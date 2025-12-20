@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" role="img" aria-label="Profil fotoraf1">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="shirt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="240" height="240" rx="28" fill="url(#bg)"/>
+  <circle cx="120" cy="96" r="56" fill="#fde68a"/>
+  <path d="M72 95c7-28 24-44 48-44s41 16 48 44c-10 13-27 20-48 20s-38-7-48-20z" fill="#1f2937" opacity="0.9"/>
+  <circle cx="98" cy="95" r="6" fill="#0f172a"/>
+  <circle cx="142" cy="95" r="6" fill="#0f172a"/>
+  <path d="M104 118c8 10 24 10 32 0" fill="none" stroke="#0f172a" stroke-width="6" stroke-linecap="round"/>
+
+  <path d="M48 220c10-46 42-72 72-72h0c30 0 62 26 72 72" fill="url(#shirt)"/>
+  <path d="M120 148c-10 0-18 8-18 18 0 4 1 8 4 12l14 18 14-18c3-4 4-8 4-12 0-10-8-18-18-18z" fill="#e2e8f0" opacity="0.95"/>
+  <path d="M104 173h32" stroke="#94a3b8" stroke-width="6" stroke-linecap="round"/>
+</svg>
