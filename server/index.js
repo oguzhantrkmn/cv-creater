@@ -55,64 +55,106 @@ app.use(passport.initialize())
 app.use(passport.session())
 
 // MySQL bağlantısı
-const pool = await mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'cv_creator',
-  waitForConnections: true,
-  connectionLimit: 10,
-})
+let pool
+try {
+  const dbHost = process.env.DB_HOST || process.env.MYSQLHOST
+  const dbUser = process.env.DB_USER || process.env.MYSQLUSER
+  const dbPassword = process.env.DB_PASSWORD || process.env.MYSQLPASSWORD
+  const dbName = process.env.DB_NAME || process.env.MYSQLDATABASE
+  const dbPort = process.env.DB_PORT || process.env.MYSQLPORT || 3306
+
+  console.log('🔍 MySQL bağlantı bilgileri:')
+  console.log('Host:', dbHost || 'localhost')
+  console.log('User:', dbUser || 'root')
+  console.log('Database:', dbName || 'cv_creator')
+  console.log('Port:', dbPort)
+
+  if (!dbHost) {
+    console.warn('⚠️ MySQL host bulunamadı! DB_HOST veya MYSQLHOST environment variable ayarlanmalı.')
+  }
+
+  pool = await mysql.createPool({
+    host: dbHost || 'localhost',
+    user: dbUser || 'root',
+    password: dbPassword || '',
+    database: dbName || 'cv_creator',
+    port: parseInt(dbPort) || 3306,
+    waitForConnections: true,
+    connectionLimit: 10,
+    connectTimeout: 10000, // 10 saniye timeout
+  })
+  console.log('✅ MySQL bağlantısı başarılı')
+} catch (error) {
+  console.error('❌ MySQL bağlantı hatası:', error.message)
+  console.error('Error code:', error.code)
+  console.error('DB_HOST:', process.env.DB_HOST || process.env.MYSQLHOST || 'YOK')
+  console.error('DB_USER:', process.env.DB_USER || process.env.MYSQLUSER || 'YOK')
+  console.error('DB_NAME:', process.env.DB_NAME || process.env.MYSQLDATABASE || 'YOK')
+  console.error('DB_PORT:', process.env.DB_PORT || process.env.MYSQLPORT || 'YOK')
+  // Bağlantı hatası olsa bile server'ı çalıştırmaya devam et
+  pool = null
+}
 
 // Basit tablo oluşturma (jenerik, production için migration kullanın)
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    provider VARCHAR(50) NOT NULL,
-    provider_id VARCHAR(255) NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL,
-    is_admin TINYINT(1) DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY unique_provider (provider, provider_id)
-  )
-`)
+if (pool) {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        provider VARCHAR(50) NOT NULL,
+        provider_id VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        is_admin TINYINT(1) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_provider (provider, provider_id)
+      )
+    `)
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS cvs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    title VARCHAR(255),
-    data JSON NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  )
-`)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cvs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        title VARCHAR(255),
+        data JSON NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `)
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS visits (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    visited_at DATE NOT NULL,
-    count INT NOT NULL DEFAULT 0,
-    UNIQUE KEY unique_date (visited_at)
-  )
-`)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS visits (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        visited_at DATE NOT NULL,
+        count INT NOT NULL DEFAULT 0,
+        UNIQUE KEY unique_date (visited_at)
+      )
+    `)
+    console.log('✅ Veritabanı tabloları hazır')
+  } catch (error) {
+    console.error('❌ Tablo oluşturma hatası:', error.message)
+  }
+} else {
+  console.warn('⚠️ MySQL bağlantısı yok, veritabanı işlemleri çalışmayacak')
+}
 
 // Ziyaret sayacı (istatistik için)
 app.use(async (req, res, next) => {
-  try {
-    const today = new Date().toISOString().slice(0, 10)
-    await pool.query(
-      `
-      INSERT INTO visits (visited_at, count)
-      VALUES (?, 1)
-      ON DUPLICATE KEY UPDATE count = count + 1
-    `,
-      [today]
-    )
-  } catch (err) {
-    console.error('Visit log error:', err.message)
+  if (pool) {
+    try {
+      const today = new Date().toISOString().slice(0, 10)
+      await pool.query(
+        `
+        INSERT INTO visits (visited_at, count)
+        VALUES (?, 1)
+        ON DUPLICATE KEY UPDATE count = count + 1
+      `,
+        [today]
+      )
+    } catch (err) {
+      console.error('Visit log error:', err.message)
+    }
   }
   next()
 })
