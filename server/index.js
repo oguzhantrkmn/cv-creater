@@ -7,11 +7,21 @@ import session from 'express-session'
 import passport from 'passport'
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
 import jwt from 'jsonwebtoken'
+import OpenAI from 'openai'
 
 dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || 3001
+
+// OpenAI başlat (isteğe bağlı)
+let openai = null
+if (process.env.OPENAI_API_KEY) {
+  openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  console.log('✅ OpenAI bağlantısı hazır')
+} else {
+  console.warn('⚠️ OPENAI_API_KEY bulunamadı. AI özellikleri çalışmayacak.')
+}
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret'
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
 
@@ -34,9 +44,19 @@ if (!stripeKey.startsWith('sk_test_') && !stripeKey.startsWith('sk_live_')) {
 
 const stripe = new Stripe(stripeKey)
 
-// CORS ayarları - tüm origin'lere izin ver (development için)
+// CORS ayarları
+const allowedOrigins = [
+  CLIENT_URL,
+  'http://localhost:5173',
+  'https://cv-creater.online',
+  'https://www.cv-creater.online',
+].filter(Boolean)
+
 app.use(cors({
-  origin: CLIENT_URL,
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true)
+    callback(new Error('CORS: İzin verilmeyen origin'))
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
@@ -238,10 +258,12 @@ app.get('/api/health', (req, res) => {
 })
 
 // Google OAuth giriş
-app.get(
-  '/auth/google',
-  passport.authenticate('google', { scope: ['profile', 'email'], session: false })
-)
+app.get('/auth/google', (req, res, next) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return res.status(503).json({ error: 'Google OAuth yapılandırılmamış. GOOGLE_CLIENT_ID ve GOOGLE_CLIENT_SECRET .env dosyasına eklenmeli.' })
+  }
+  passport.authenticate('google', { scope: ['profile', 'email'], session: false })(req, res, next)
+})
 
 app.get(
   '/auth/google/callback',
@@ -438,6 +460,98 @@ app.get('/api/check-payment/:sessionId', async (req, res) => {
   } catch (error) {
     console.error('Payment check error:', error)
     res.status(500).json({ error: error.message })
+  }
+})
+
+// ===== AI ENDPOINTLERİ =====
+
+// AI durum kontrolü
+app.get('/api/ai/status', (req, res) => {
+  res.json({ available: !!openai })
+})
+
+// AI: Kariyer Hedefi Oluştur
+app.post('/api/ai/objective', async (req, res) => {
+  if (!openai) return res.status(503).json({ error: 'AI yapılandırılmamış. Lütfen OPENAI_API_KEY ekleyin.' })
+  const { name, title, experience, education } = req.body
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `Türkçe, profesyonel ve ATS uyumlu bir kariyer hedefi/özet yaz. 2-3 cümle, birinci şahıs olmayan biçimde. Güçlü eylem fiilleri kullan.
+Ad: ${name || 'Belirtilmemiş'}
+Pozisyon: ${title || 'Belirtilmemiş'}
+Deneyimler: ${(experience || []).map(e => e.company).filter(Boolean).slice(0, 3).join(', ') || 'Belirtilmemiş'}
+Eğitim: ${(education || []).map(e => e.school).filter(Boolean).slice(0, 2).join(', ') || 'Belirtilmemiş'}
+Sadece özet metnini ver, başka açıklama ekleme.`
+      }],
+      max_tokens: 250,
+      temperature: 0.7,
+    })
+    res.json({ text: completion.choices[0].message.content.trim() })
+  } catch (err) {
+    console.error('AI objective error:', err)
+    const msg = err.status === 429
+      ? 'OpenAI kota aşıldı. Lütfen platform.openai.com adresinden hesabınıza kredi ekleyin.'
+      : err.status === 401 ? 'OpenAI API Key geçersiz.' : err.message
+    res.status(err.status || 500).json({ error: msg })
+  }
+})
+
+// AI: İş Deneyimi Maddesini İyileştir
+app.post('/api/ai/improve-bullet', async (req, res) => {
+  if (!openai) return res.status(503).json({ error: 'AI yapılandırılmamış. Lütfen OPENAI_API_KEY ekleyin.' })
+  const { bullet, position } = req.body
+  if (!bullet) return res.status(400).json({ error: 'Madde metni gerekli' })
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `Aşağıdaki iş deneyimi maddesini daha etkileyici ve ATS uyumlu hale getir. Güçlü eylem fiili ile başlat, mümkünse ölçülebilir sonuç ekle. Türkçe yaz. Sadece düzenlenmiş tek cümleyi ver.
+Pozisyon: ${position || 'Belirtilmemiş'}
+Madde: "${bullet}"`
+      }],
+      max_tokens: 120,
+      temperature: 0.7,
+    })
+    res.json({ text: completion.choices[0].message.content.trim().replace(/^["']|["']$/g, '') })
+  } catch (err) {
+    console.error('AI improve error:', err)
+    const msg = err.status === 429
+      ? 'OpenAI kota aşıldı. Lütfen platform.openai.com adresinden hesabınıza kredi ekleyin.'
+      : err.status === 401 ? 'OpenAI API Key geçersiz.' : err.message
+    res.status(err.status || 500).json({ error: msg })
+  }
+})
+
+// AI: Pozisyona Göre Beceri Öner
+app.post('/api/ai/suggest-skills', async (req, res) => {
+  if (!openai) return res.status(503).json({ error: 'AI yapılandırılmamış. Lütfen OPENAI_API_KEY ekleyin.' })
+  const { title, existing } = req.body
+  if (!title) return res.status(400).json({ error: 'Pozisyon başlığı gerekli' })
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `"${title}" pozisyonu için en önemli 8-10 teknik beceriyi Türkçe ve/veya İngilizce olarak listele.${existing?.length ? ` Şunları hariç tut: ${existing.join(', ')}` : ''} Sadece virgülle ayrılmış beceri isimlerini ver, numara veya açıklama ekleme.`
+      }],
+      max_tokens: 150,
+      temperature: 0.5,
+    })
+    const skills = completion.choices[0].message.content
+      .split(',')
+      .map(s => s.trim().replace(/^\d+\.\s*/, ''))
+      .filter(s => s.length > 0 && s.length < 40)
+    res.json({ skills })
+  } catch (err) {
+    console.error('AI skills error:', err)
+    const msg = err.status === 429
+      ? 'OpenAI kota aşıldı. Lütfen platform.openai.com adresinden hesabınıza kredi ekleyin.'
+      : err.status === 401 ? 'OpenAI API Key geçersiz.' : err.message
+    res.status(err.status || 500).json({ error: msg })
   }
 })
 

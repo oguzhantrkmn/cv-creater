@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, useEffect, useCallback, forwardRef } from 'react'
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
+import QRCode from 'qrcode'
 import './App.css'
 import turkeyLocationsData from './data/turkey-locations.json'
 
@@ -109,6 +110,7 @@ const defaultData = {
   birthMonth: '',
   birthYear: '',
   objective: '',
+  websiteUrl: '',
   education: [],
   experience: [],
   projects: [],
@@ -118,6 +120,7 @@ const defaultData = {
   languages: [],
   competencies: [],
   interests: [],
+  references: [],
 }
 
 // Örnek CV'ler
@@ -296,12 +299,85 @@ function App() {
   const [downloadMessage, setDownloadMessage] = useState('')
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [showConfirmModal, setShowConfirmModal] = useState(false)
+  const [template, setTemplate] = useState('classic')
+  const [qrDataUrl, setQrDataUrl] = useState('')
+  const [showAtsPanel, setShowAtsPanel] = useState(false)
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true')
+  const [showPremiumModal, setShowPremiumModal] = useState(false)
+  const [aiAvailable, setAiAvailable] = useState(false)
+  const [aiLoading, setAiLoading] = useState('')
+  const [toast, setToast] = useState(null)
 
   // PDF dosya adı
   const pdfFileName = useMemo(
     () => `${cvData.name?.toLowerCase().replace(/\s+/g, '-') || 'cv'}.pdf`,
     [cvData.name]
   )
+
+  // ATS Uyum Skoru
+  const showToast = useCallback((message, type = 'error') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 5000)
+  }, [])
+
+  const atsScore = useMemo(() => {
+    let score = 0
+    const issues = []
+    const tips = []
+
+    if (cvData.name.trim()) score += 8; else issues.push('Ad Soyad girilmemiş')
+    if (cvData.email.trim()) score += 8; else issues.push('E-posta girilmemiş')
+    if (cvData.phone.trim()) score += 5; else issues.push('Telefon girilmemiş')
+    if (cvData.title.trim()) score += 7; else issues.push('Ünvan/Pozisyon girilmemiş')
+    if (cvData.city) score += 4; else issues.push('Konum belirtilmemiş')
+    if (cvData.email.includes('@') && cvData.email.includes('.')) score += 3
+
+    const objWords = (cvData.objective || '').trim().split(/\s+/).filter(Boolean).length
+    if (objWords >= 50) score += 12
+    else if (objWords >= 20) { score += 6; tips.push('Kariyer hedefini 50+ kelimeye çıkarın') }
+    else issues.push('Kariyer hedefi eksik veya çok kısa')
+
+    if (cvData.experience.length >= 2) score += 13
+    else if (cvData.experience.length === 1) { score += 7; tips.push('Birden fazla iş deneyimi ekleyin') }
+    else issues.push('İş deneyimi eklenmemiş')
+
+    const hasDetailedExp = cvData.experience.some(e => (e.details || []).length >= 3)
+    if (hasDetailedExp) score += 8
+    else if (cvData.experience.length > 0) tips.push('İş deneyimi maddelerini 3+ satıra çıkarın')
+
+    if (cvData.education.length > 0) score += 10; else issues.push('Eğitim bilgisi eklenmemiş')
+
+    if (cvData.skills.length >= 8) score += 10
+    else if (cvData.skills.length >= 3) { score += 5; tips.push('En az 8 teknik beceri ekleyin') }
+    else issues.push('Teknik beceriler eksik (en az 3 ekleyin)')
+
+    if (cvData.languages.length > 0) score += 5; else tips.push('Yabancı dil ekleyin')
+    if (cvData.certificates.length > 0) score += 7
+
+    return { score: Math.min(score, 100), issues, tips }
+  }, [cvData])
+
+  // CV Tamamlanma Yüzdesi
+  const cvCompletion = useMemo(() => {
+    const checks = [
+      { label: 'Ad Soyad', done: !!cvData.name.trim() },
+      { label: 'E-posta', done: !!cvData.email.trim() },
+      { label: 'Telefon', done: !!cvData.phone.trim() },
+      { label: 'Ünvan/Pozisyon', done: !!cvData.title.trim() },
+      { label: 'Konum', done: !!cvData.city },
+      { label: 'Kariyer Hedefi', done: (cvData.objective || '').trim().length > 20 },
+      { label: 'Profil Fotoğrafı', done: !!cvData.avatar },
+      { label: 'İş Deneyimi', done: cvData.experience.length > 0 },
+      { label: 'Eğitim', done: cvData.education.length > 0 },
+      { label: 'Teknik Beceriler', done: cvData.skills.length >= 3 },
+      { label: 'Yabancı Dil', done: cvData.languages.length > 0 },
+    ]
+    const doneCount = checks.filter(c => c.done).length
+    return {
+      percentage: Math.round((doneCount / checks.length) * 100),
+      missing: checks.filter(c => !c.done).map(c => c.label),
+    }
+  }, [cvData])
 
   // PDF indirme fonksiyonu
   const exportToPdf = useCallback(async () => {
@@ -879,11 +955,12 @@ function App() {
     handleArrayChange(section, id, 'details', details)
   }
 
-  const addItem = (section, template) => {
-    const newId = Math.max(0, ...cvData[section].map((i) => i.id)) + 1
+  const addItem = (section, itemTemplate) => {
+    const existing = cvData[section] || []
+    const newId = Math.max(0, ...existing.map((i) => i.id)) + 1
     setCvData((prev) => ({
       ...prev,
-      [section]: [...prev[section], { ...template, id: newId }],
+      [section]: [...(prev[section] || []), { ...itemTemplate, id: newId }],
     }))
   }
 
@@ -1224,169 +1301,513 @@ function App() {
     }
   }
 
-  const renderCv = (innerRef = null) => (
-    <div className="cv-page" ref={innerRef}>
-      <div className="cv__header" style={{ borderColor: cvData.accent }}>
+  const renderCv = (innerRef = null) => {
+    if (template === 'modern') return renderModernCv(innerRef)
+    if (template === 'creative') return renderCreativeCv(innerRef)
+    if (template === 'compact') return renderCompactCv(innerRef)
+    return (
+      <div className={`cv-page${template === 'minimal' ? ' cv-page--minimal' : ''}`} ref={innerRef}>
+        <div className="cv__header" style={{ borderColor: template === 'minimal' ? '#ccc' : cvData.accent }}>
+          {cvData.avatar && (
+            <div className={`avatar ${getAvatarClass()}`} style={{ borderColor: template === 'minimal' ? '#ccc' : cvData.accent }}>
+              <img src={cvData.avatar} alt={`${cvData.name || 'Aday'} avatar`} width="120" height="120" style={{ display: 'block' }} />
+            </div>
+          )}
+          <div style={{ flex: 1 }}>
+            <h1>{cvData.name || 'Ad Soyad'}</h1>
+            <p className="cv__title">{cvData.title || 'Hedef Pozisyon / Ünvan'}</p>
+            <div className="meta">
+              {(cvData.city || cvData.district) && <span>📍 {formatLocation(cvData.city, cvData.district)}</span>}
+              {cvData.phone && <span>📞 {cvData.phone}</span>}
+              {cvData.email && <span>✉️ {cvData.email}</span>}
+              {formatBirthDate() && <span>🎂 {formatBirthDate()}</span>}
+              {cvData.websiteUrl && <span>🔗 {cvData.websiteUrl}</span>}
+            </div>
+          </div>
+          {qrDataUrl && (
+            <div className="cv__qr">
+              <img src={qrDataUrl} alt="QR Kod" width="72" height="72" />
+            </div>
+          )}
+        </div>
+
+        {cvData.objective && (
+          <Section title="Özet" accent={template === 'minimal' ? '#555' : cvData.accent}>
+            <p className="muted">{cvData.objective}</p>
+          </Section>
+        )}
+
+        {cvData.education.length > 0 && (
+          <Section title="Eğitim" accent={template === 'minimal' ? '#555' : cvData.accent}>
+            {cvData.education.map((item) => (
+              <Item key={item.id} title={item.school} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
+                {item.note && <p className="muted">{item.note}</p>}
+              </Item>
+            ))}
+          </Section>
+        )}
+
+        {cvData.experience.length > 0 && (
+          <Section title="İş Deneyimi" accent={template === 'minimal' ? '#555' : cvData.accent}>
+            {cvData.experience.map((item) => (
+              <Item key={item.id} title={item.company} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
+                {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
+              </Item>
+            ))}
+          </Section>
+        )}
+
+        {cvData.projects.length > 0 && (
+          <Section title="Projeler" accent={template === 'minimal' ? '#555' : cvData.accent}>
+            {cvData.projects.map((item) => (
+              <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)}>
+                {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
+              </Item>
+            ))}
+          </Section>
+        )}
+
+        {cvData.activities.length > 0 && (
+          <Section title="Aktiviteler" accent={template === 'minimal' ? '#555' : cvData.accent}>
+            {cvData.activities.map((item) => (
+              <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
+                {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
+              </Item>
+            ))}
+          </Section>
+        )}
+
+        {cvData.certificates.length > 0 && (
+          <Section title="Sertifikalar" accent={template === 'minimal' ? '#555' : cvData.accent}>
+            {cvData.certificates.map((item) => (
+              <Item key={item.id} title={item.name} subtitle={`${item.org} • ${item.date}`} />
+            ))}
+          </Section>
+        )}
+
+        <div className="inline-grid">
+          {cvData.skills.length > 0 && (
+            <Section title="Teknik Beceriler" accent={template === 'minimal' ? '#555' : cvData.accent}>
+              <ul className="pill-list">{cvData.skills.map((s) => <li key={s}>{s}</li>)}</ul>
+            </Section>
+          )}
+          {cvData.competencies.length > 0 && (
+            <Section title="Yetkinlikler" accent={template === 'minimal' ? '#555' : cvData.accent}>
+              <ul className="pill-list">{cvData.competencies.map((c) => <li key={c}>{c}</li>)}</ul>
+            </Section>
+          )}
+        </div>
+
+        <div className="inline-grid">
+          {cvData.languages.length > 0 && (
+            <Section title="Yabancı Diller" accent={template === 'minimal' ? '#555' : cvData.accent}>
+              <ul>{cvData.languages.map((item) => <li key={item.lang}>{item.lang} ({item.level})</li>)}</ul>
+            </Section>
+          )}
+          {cvData.interests.length > 0 && (
+            <Section title="İlgi Alanları" accent={template === 'minimal' ? '#555' : cvData.accent}>
+              <ul className="pill-list soft">{cvData.interests.map((i) => <li key={i}>{i}</li>)}</ul>
+            </Section>
+          )}
+        </div>
+
+        {cvData.references && cvData.references.length > 0 && (
+          <Section title="Referanslar" accent={template === 'minimal' ? '#555' : cvData.accent}>
+            <div className="inline-grid">
+              {cvData.references.map((ref, i) => (
+                <div key={i} className="reference-item">
+                  <p className="item__title">{ref.name}</p>
+                  {ref.title && <p className="muted" style={{ margin: '2px 0' }}>{ref.title}{ref.company ? ` • ${ref.company}` : ''}</p>}
+                  <p className="muted" style={{ fontSize: '0.82em' }}>
+                    {[ref.phone, ref.email].filter(Boolean).join(' | ')}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
+      </div>
+    )
+  }
+
+  const renderModernCv = (innerRef = null) => (
+    <div className="cv-page cv-page--modern" ref={innerRef}>
+      <div className="cv-modern__header" style={{ backgroundColor: cvData.accent }}>
         {cvData.avatar && (
-          <div className={`avatar ${getAvatarClass()}`} style={{ borderColor: cvData.accent }}>
-            <img 
-              src={cvData.avatar} 
-              alt={`${cvData.name || 'Aday'} avatar`}
-              width="120"
-              height="120"
-              style={{ display: 'block' }}
-            />
+          <div className={`avatar avatar--modern ${getAvatarClass()}`}>
+            <img src={cvData.avatar} alt={cvData.name || 'Aday'} width="100" height="100" style={{ display: 'block' }} />
           </div>
         )}
-        <div>
+        <div className="cv-modern__header-text">
           <h1>{cvData.name || 'Ad Soyad'}</h1>
           <p className="cv__title">{cvData.title || 'Hedef Pozisyon / Ünvan'}</p>
-          <div className="meta">
-            {(cvData.city || cvData.district) && (
-              <span>📍 {formatLocation(cvData.city, cvData.district)}</span>
-            )}
-            {cvData.phone && <span>📞 {cvData.phone}</span>}
-            {cvData.email && <span>✉️ {cvData.email}</span>}
-            {formatBirthDate() && <span>🎂 {formatBirthDate()}</span>}
+        </div>
+        {qrDataUrl && <div className="cv__qr cv__qr--modern"><img src={qrDataUrl} alt="QR" width="64" height="64" /></div>}
+      </div>
+
+      <div className="cv-modern__body">
+        <aside className="cv-modern__sidebar" style={{ borderColor: cvData.accent }}>
+          <div className="cv-modern__sidebar-section">
+            <h4 style={{ color: cvData.accent }}>İletişim</h4>
+            {(cvData.city || cvData.district) && <p>📍 {formatLocation(cvData.city, cvData.district)}</p>}
+            {cvData.phone && <p>📞 {cvData.phone}</p>}
+            {cvData.email && <p>✉️ {cvData.email}</p>}
+            {formatBirthDate() && <p>🎂 {formatBirthDate()}</p>}
+            {cvData.websiteUrl && <p>🔗 {cvData.websiteUrl}</p>}
           </div>
+
+          {cvData.skills.length > 0 && (
+            <div className="cv-modern__sidebar-section">
+              <h4 style={{ color: cvData.accent }}>Teknik Beceriler</h4>
+              <ul className="pill-list pill-list--sidebar">
+                {cvData.skills.map((s) => <li key={s}>{s}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {cvData.competencies.length > 0 && (
+            <div className="cv-modern__sidebar-section">
+              <h4 style={{ color: cvData.accent }}>Yetkinlikler</h4>
+              <ul className="pill-list pill-list--sidebar">
+                {cvData.competencies.map((c) => <li key={c}>{c}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {cvData.languages.length > 0 && (
+            <div className="cv-modern__sidebar-section">
+              <h4 style={{ color: cvData.accent }}>Yabancı Diller</h4>
+              {cvData.languages.map((item) => (
+                <div key={item.lang} className="cv-modern__lang-item">
+                  <span>{item.lang}</span>
+                  <span className="cv-modern__lang-level">{item.level}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {cvData.interests.length > 0 && (
+            <div className="cv-modern__sidebar-section">
+              <h4 style={{ color: cvData.accent }}>İlgi Alanları</h4>
+              <p className="muted" style={{ fontSize: '0.82em', lineHeight: 1.6 }}>{cvData.interests.join(', ')}</p>
+            </div>
+          )}
+        </aside>
+
+        <main className="cv-modern__main">
+          {cvData.objective && (
+            <div className="cv-modern__section">
+              <h3 style={{ color: cvData.accent }}>Özet</h3>
+              <p className="muted">{cvData.objective}</p>
+            </div>
+          )}
+
+          {cvData.experience.length > 0 && (
+            <div className="cv-modern__section">
+              <h3 style={{ color: cvData.accent }}>İş Deneyimi</h3>
+              {cvData.experience.map((item) => (
+                <Item key={item.id} title={item.company} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
+                  {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
+                </Item>
+              ))}
+            </div>
+          )}
+
+          {cvData.education.length > 0 && (
+            <div className="cv-modern__section">
+              <h3 style={{ color: cvData.accent }}>Eğitim</h3>
+              {cvData.education.map((item) => (
+                <Item key={item.id} title={item.school} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
+                  {item.note && <p className="muted">{item.note}</p>}
+                </Item>
+              ))}
+            </div>
+          )}
+
+          {cvData.projects.length > 0 && (
+            <div className="cv-modern__section">
+              <h3 style={{ color: cvData.accent }}>Projeler</h3>
+              {cvData.projects.map((item) => (
+                <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)}>
+                  {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
+                </Item>
+              ))}
+            </div>
+          )}
+
+          {cvData.activities.length > 0 && (
+            <div className="cv-modern__section">
+              <h3 style={{ color: cvData.accent }}>Aktiviteler</h3>
+              {cvData.activities.map((item) => (
+                <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
+                  {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
+                </Item>
+              ))}
+            </div>
+          )}
+
+          {cvData.certificates.length > 0 && (
+            <div className="cv-modern__section">
+              <h3 style={{ color: cvData.accent }}>Sertifikalar</h3>
+              {cvData.certificates.map((item) => (
+                <Item key={item.id} title={item.name} subtitle={`${item.org} • ${item.date}`} />
+              ))}
+            </div>
+          )}
+
+          {cvData.references && cvData.references.length > 0 && (
+            <div className="cv-modern__section">
+              <h3 style={{ color: cvData.accent }}>Referanslar</h3>
+              <div className="inline-grid">
+                {cvData.references.map((ref, i) => (
+                  <div key={i} className="reference-item">
+                    <p className="item__title">{ref.name}</p>
+                    {ref.title && <p className="muted" style={{ margin: '2px 0' }}>{ref.title}{ref.company ? ` • ${ref.company}` : ''}</p>}
+                    <p className="muted" style={{ fontSize: '0.82em' }}>{[ref.phone, ref.email].filter(Boolean).join(' | ')}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  )
+
+  const renderCreativeCv = (innerRef = null) => (
+    <div className="cv-page cv-page--creative" ref={innerRef}>
+      <div className="cv-creative__sidebar" style={{ backgroundColor: cvData.accent }}>
+        {cvData.avatar && (
+          <div className={`avatar avatar--creative ${getAvatarClass()}`}>
+            <img src={cvData.avatar} alt={cvData.name || 'Aday'} width="90" height="90" style={{ display: 'block' }} />
+          </div>
+        )}
+        <div className="cv-creative__sidebar-name">
+          <h1>{cvData.name || 'Ad Soyad'}</h1>
+          <p>{cvData.title || 'Pozisyon'}</p>
+        </div>
+
+        <div className="cv-creative__sidebar-section">
+          <h4>İletişim</h4>
+          {(cvData.city || cvData.district) && <p>📍 {formatLocation(cvData.city, cvData.district)}</p>}
+          {cvData.phone && <p>📞 {cvData.phone}</p>}
+          {cvData.email && <p>✉️ {cvData.email}</p>}
+          {formatBirthDate() && <p>🎂 {formatBirthDate()}</p>}
+          {cvData.websiteUrl && <p>🔗 {cvData.websiteUrl}</p>}
+          {qrDataUrl && <img src={qrDataUrl} alt="QR" width="64" height="64" className="cv-creative__qr" />}
+        </div>
+
+        {cvData.skills.length > 0 && (
+          <div className="cv-creative__sidebar-section">
+            <h4>Beceriler</h4>
+            {cvData.skills.map(s => <span key={s} className="cv-creative__skill-tag">{s}</span>)}
+          </div>
+        )}
+
+        {cvData.languages.length > 0 && (
+          <div className="cv-creative__sidebar-section">
+            <h4>Diller</h4>
+            {cvData.languages.map(l => (
+              <div key={l.lang} className="cv-creative__lang">
+                <span>{l.lang}</span><span className="cv-creative__lang-lvl">{l.level}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {cvData.interests.length > 0 && (
+          <div className="cv-creative__sidebar-section">
+            <h4>İlgi Alanları</h4>
+            <p style={{ fontSize: '0.8em', lineHeight: 1.6, opacity: 0.85 }}>{cvData.interests.join(' · ')}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="cv-creative__main">
+        {cvData.objective && (
+          <div className="cv-creative__section">
+            <h3 style={{ color: cvData.accent }}>Özet</h3>
+            <p className="muted">{cvData.objective}</p>
+          </div>
+        )}
+        {cvData.experience.length > 0 && (
+          <div className="cv-creative__section">
+            <h3 style={{ color: cvData.accent }}>İş Deneyimi</h3>
+            {cvData.experience.map(item => (
+              <Item key={item.id} title={item.company} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
+                {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
+              </Item>
+            ))}
+          </div>
+        )}
+        {cvData.education.length > 0 && (
+          <div className="cv-creative__section">
+            <h3 style={{ color: cvData.accent }}>Eğitim</h3>
+            {cvData.education.map(item => (
+              <Item key={item.id} title={item.school} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
+                {item.note && <p className="muted">{item.note}</p>}
+              </Item>
+            ))}
+          </div>
+        )}
+        {cvData.projects.length > 0 && (
+          <div className="cv-creative__section">
+            <h3 style={{ color: cvData.accent }}>Projeler</h3>
+            {cvData.projects.map(item => (
+              <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)}>
+                {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
+              </Item>
+            ))}
+          </div>
+        )}
+        {cvData.certificates.length > 0 && (
+          <div className="cv-creative__section">
+            <h3 style={{ color: cvData.accent }}>Sertifikalar</h3>
+            {cvData.certificates.map(item => <Item key={item.id} title={item.name} subtitle={`${item.org} · ${item.date}`} />)}
+          </div>
+        )}
+        {cvData.competencies.length > 0 && (
+          <div className="cv-creative__section">
+            <h3 style={{ color: cvData.accent }}>Yetkinlikler</h3>
+            <ul className="pill-list">{cvData.competencies.map(c => <li key={c}>{c}</li>)}</ul>
+          </div>
+        )}
+        {cvData.references && cvData.references.length > 0 && (
+          <div className="cv-creative__section">
+            <h3 style={{ color: cvData.accent }}>Referanslar</h3>
+            <div className="inline-grid">
+              {cvData.references.map((ref, i) => (
+                <div key={i} className="reference-item">
+                  <p className="item__title">{ref.name}</p>
+                  {ref.title && <p className="muted" style={{ margin: '2px 0' }}>{ref.title}{ref.company ? ` • ${ref.company}` : ''}</p>}
+                  <p className="muted" style={{ fontSize: '0.82em' }}>{[ref.phone, ref.email].filter(Boolean).join(' | ')}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  const renderCompactCv = (innerRef = null) => (
+    <div className="cv-page cv-page--compact" ref={innerRef}>
+      <div className="cv-compact__header" style={{ borderBottomColor: cvData.accent }}>
+        <div className="cv-compact__header-left">
+          {cvData.avatar && (
+            <div className={`avatar avatar--compact ${getAvatarClass()}`}>
+              <img src={cvData.avatar} alt={cvData.name || 'Aday'} width="70" height="70" style={{ display: 'block' }} />
+            </div>
+          )}
+          <div>
+            <h1 className="cv-compact__name">{cvData.name || 'Ad Soyad'}</h1>
+            <p className="cv-compact__title" style={{ color: cvData.accent }}>{cvData.title || 'Pozisyon'}</p>
+          </div>
+        </div>
+        <div className="cv-compact__contact">
+          {cvData.email && <span>✉ {cvData.email}</span>}
+          {cvData.phone && <span>📞 {cvData.phone}</span>}
+          {(cvData.city || cvData.district) && <span>📍 {formatLocation(cvData.city, cvData.district)}</span>}
+          {cvData.websiteUrl && <span>🔗 {cvData.websiteUrl}</span>}
+          {qrDataUrl && <img src={qrDataUrl} alt="QR" width="50" height="50" style={{ borderRadius: 4 }} />}
         </div>
       </div>
 
       {cvData.objective && (
-        <Section title="Özet" accent={cvData.accent}>
-          <p className="muted">{cvData.objective}</p>
-        </Section>
+        <div className="cv-compact__section">
+          <h3 style={{ color: cvData.accent }}>Özet</h3>
+          <p className="muted cv-compact__text">{cvData.objective}</p>
+        </div>
       )}
 
-      {cvData.education.length > 0 && (
-        <Section title="Eğitim" accent={cvData.accent}>
-          {cvData.education.map((item) => (
-            <Item
-              key={item.id}
-              title={item.school}
-              subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)}
-              location={formatLocation(item.city, item.district)}
-            >
-              {item.note && <p className="muted">{item.note}</p>}
-            </Item>
-          ))}
-        </Section>
-      )}
-
-      {cvData.experience.length > 0 && (
-        <Section title="İş Deneyimi" accent={cvData.accent}>
-          {cvData.experience.map((item) => (
-            <Item
-              key={item.id}
-              title={item.company}
-              subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)}
-              location={formatLocation(item.city, item.district)}
-            >
-              {item.details.length > 0 && (
-                <ul>
-                  {item.details.map((detail, i) => (
-                    <li key={i}>{detail}</li>
-                  ))}
-                </ul>
-              )}
-            </Item>
-          ))}
-        </Section>
-      )}
-
-      {cvData.projects.length > 0 && (
-        <Section title="Projeler" accent={cvData.accent}>
-          {cvData.projects.map((item) => (
-            <Item
-              key={item.id}
-              title={item.name}
-              subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)}
-            >
-              {item.details.length > 0 && (
-                <ul>
-                  {item.details.map((detail, i) => (
-                    <li key={i}>{detail}</li>
-                  ))}
-                </ul>
-              )}
-            </Item>
-          ))}
-        </Section>
-      )}
-
-      {cvData.activities.length > 0 && (
-        <Section title="Aktiviteler" accent={cvData.accent}>
-          {cvData.activities.map((item) => (
-            <Item
-              key={item.id}
-              title={item.name}
-              subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)}
-              location={formatLocation(item.city, item.district)}
-            >
-              {item.details.length > 0 && (
-                <ul>
-                  {item.details.map((detail, i) => (
-                    <li key={i}>{detail}</li>
-                  ))}
-                </ul>
-              )}
-            </Item>
-          ))}
-        </Section>
-      )}
-
-      {cvData.certificates.length > 0 && (
-        <Section title="Sertifikalar" accent={cvData.accent}>
-          {cvData.certificates.map((item) => (
-            <Item
-              key={item.id}
-              title={item.name}
-              subtitle={`${item.org} • ${item.date}`}
-            />
-          ))}
-        </Section>
-      )}
-
-      <div className="inline-grid">
-        {cvData.skills.length > 0 && (
-          <Section title="Teknik Beceriler" accent={cvData.accent}>
-            <ul className="pill-list">
-              {cvData.skills.map((skill) => (
-                <li key={skill}>{skill}</li>
+      <div className="cv-compact__two-col">
+        <div className="cv-compact__col-main">
+          {cvData.experience.length > 0 && (
+            <div className="cv-compact__section">
+              <h3 style={{ color: cvData.accent }}>Deneyim</h3>
+              {cvData.experience.map(item => (
+                <div key={item.id} className="cv-compact__item">
+                  <div className="cv-compact__item-head">
+                    <strong>{item.company}</strong>
+                    <span className="cv-compact__date">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
+                  </div>
+                  {formatLocation(item.city, item.district) && <p className="cv-compact__loc">📍 {formatLocation(item.city, item.district)}</p>}
+                  {item.details.length > 0 && <ul className="cv-compact__bullets">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
+                </div>
               ))}
-            </ul>
-          </Section>
-        )}
-        {cvData.competencies.length > 0 && (
-          <Section title="Yetkinlikler" accent={cvData.accent}>
-            <ul className="pill-list">
-              {cvData.competencies.map((comp) => (
-                <li key={comp}>{comp}</li>
+            </div>
+          )}
+          {cvData.education.length > 0 && (
+            <div className="cv-compact__section">
+              <h3 style={{ color: cvData.accent }}>Eğitim</h3>
+              {cvData.education.map(item => (
+                <div key={item.id} className="cv-compact__item">
+                  <div className="cv-compact__item-head">
+                    <strong>{item.school}</strong>
+                    <span className="cv-compact__date">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
+                  </div>
+                  {item.note && <p className="muted cv-compact__text">{item.note}</p>}
+                </div>
               ))}
-            </ul>
-          </Section>
-        )}
-      </div>
+            </div>
+          )}
+          {cvData.projects.length > 0 && (
+            <div className="cv-compact__section">
+              <h3 style={{ color: cvData.accent }}>Projeler</h3>
+              {cvData.projects.map(item => (
+                <div key={item.id} className="cv-compact__item">
+                  <div className="cv-compact__item-head">
+                    <strong>{item.name}</strong>
+                    <span className="cv-compact__date">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
+                  </div>
+                  {item.details.length > 0 && <ul className="cv-compact__bullets">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-      <div className="inline-grid">
-        {cvData.languages.length > 0 && (
-          <Section title="Yabancı Diller" accent={cvData.accent}>
-            <ul>
-              {cvData.languages.map((item) => (
-                <li key={item.lang}>{item.lang} ({item.level})</li>
+        <div className="cv-compact__col-side">
+          {cvData.skills.length > 0 && (
+            <div className="cv-compact__section">
+              <h3 style={{ color: cvData.accent }}>Beceriler</h3>
+              <div className="cv-compact__tags">{cvData.skills.map(s => <span key={s} className="cv-compact__tag" style={{ borderColor: cvData.accent }}>{s}</span>)}</div>
+            </div>
+          )}
+          {cvData.languages.length > 0 && (
+            <div className="cv-compact__section">
+              <h3 style={{ color: cvData.accent }}>Diller</h3>
+              {cvData.languages.map(l => (
+                <div key={l.lang} className="cv-compact__lang">
+                  <span>{l.lang}</span><span style={{ color: cvData.accent, fontSize: '0.8em' }}>{l.level}</span>
+                </div>
               ))}
-            </ul>
-          </Section>
-        )}
-        {cvData.interests.length > 0 && (
-          <Section title="İlgi Alanları" accent={cvData.accent}>
-            <ul className="pill-list soft">
-              {cvData.interests.map((interest) => (
-                <li key={interest}>{interest}</li>
+            </div>
+          )}
+          {cvData.certificates.length > 0 && (
+            <div className="cv-compact__section">
+              <h3 style={{ color: cvData.accent }}>Sertifikalar</h3>
+              {cvData.certificates.map(item => (
+                <div key={item.id} className="cv-compact__item">
+                  <strong style={{ fontSize: '0.83em' }}>{item.name}</strong>
+                  <p className="muted cv-compact__text">{item.org} · {item.date}</p>
+                </div>
               ))}
-            </ul>
-          </Section>
-        )}
+            </div>
+          )}
+          {cvData.competencies.length > 0 && (
+            <div className="cv-compact__section">
+              <h3 style={{ color: cvData.accent }}>Yetkinlikler</h3>
+              <div className="cv-compact__tags">{cvData.competencies.map(c => <span key={c} className="cv-compact__tag" style={{ borderColor: cvData.accent }}>{c}</span>)}</div>
+            </div>
+          )}
+          {cvData.interests.length > 0 && (
+            <div className="cv-compact__section">
+              <h3 style={{ color: cvData.accent }}>İlgi Alanları</h3>
+              <p className="muted cv-compact__text" style={{ fontSize: '0.82em' }}>{cvData.interests.join(', ')}</p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -1409,6 +1830,86 @@ function App() {
     setCvData(defaultData)
     setShowConfirmModal(false)
   }
+
+  // Dark mode
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+    localStorage.setItem('darkMode', darkMode)
+  }, [darkMode])
+
+  // QR Kod oluştur
+  useEffect(() => {
+    if (!cvData.websiteUrl) { setQrDataUrl(''); return }
+    QRCode.toDataURL(cvData.websiteUrl, { width: 80, margin: 1 })
+      .then(url => setQrDataUrl(url))
+      .catch(() => setQrDataUrl(''))
+  }, [cvData.websiteUrl])
+
+  // AI: Kariyer hedefi yaz
+  const handleAiObjective = async () => {
+    setAiLoading('objective')
+    try {
+      const res = await fetch(`${API_URL}/api/ai/objective`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: cvData.name, title: cvData.title, experience: cvData.experience, education: cvData.education }),
+      })
+      const data = await res.json()
+      if (data.error) { showToast(data.error); return }
+      handleFieldChange('objective', data.text)
+    } catch { showToast('Bağlantı hatası. Sunucuyu kontrol edin.') }
+    finally { setAiLoading('') }
+  }
+
+  // AI: Beceri öner
+  const handleAiSuggestSkills = async () => {
+    if (!cvData.title.trim()) { showToast('Önce Ünvan/Pozisyon alanını doldurun.', 'warning'); return }
+    setAiLoading('skills')
+    try {
+      const res = await fetch(`${API_URL}/api/ai/suggest-skills`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: cvData.title, existing: cvData.skills }),
+      })
+      const data = await res.json()
+      if (data.error) { showToast(data.error); return }
+      const newSkills = data.skills.filter(s => !cvData.skills.includes(s))
+      setCvData(prev => ({ ...prev, skills: [...prev.skills, ...newSkills] }))
+    } catch { showToast('Bağlantı hatası. Sunucuyu kontrol edin.') }
+    finally { setAiLoading('') }
+  }
+
+  // AI: Deneyim maddesi iyileştir
+  const handleAiImproveBullet = async (expId, bulletIndex, bulletText) => {
+    if (!bulletText.trim()) return
+    setAiLoading(`bullet-${expId}-${bulletIndex}`)
+    try {
+      const exp = cvData.experience.find(e => e.id === expId)
+      const res = await fetch(`${API_URL}/api/ai/improve-bullet`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bullet: bulletText, position: exp?.company }),
+      })
+      const data = await res.json()
+      if (data.error) { showToast(data.error); return }
+      const newDetails = [...(exp?.details || [])]
+      newDetails[bulletIndex] = data.text
+      handleArrayChange('experience', expId, 'details', newDetails)
+    } catch { showToast('Bağlantı hatası. Sunucuyu kontrol edin.') }
+    finally { setAiLoading('') }
+  }
+
+  // AI durumunu kontrol et
+  useEffect(() => {
+    fetch(`${API_URL}/api/ai/status`)
+      .then(r => r.json())
+      .then(d => setAiAvailable(d.available))
+      .catch(() => setAiAvailable(false))
+  }, [])
 
   // JWT token ile backend'den kullanıcı bilgisini çek
   useEffect(() => {
@@ -1563,6 +2064,17 @@ function App() {
 
   return (
     <div className="page">
+      {/* Toast Bildirim */}
+      {toast && (
+        <div className={`toast toast--${toast.type}`} onClick={() => setToast(null)}>
+          <span className="toast__icon">{toast.type === 'error' ? '⚠️' : toast.type === 'warning' ? '💡' : 'ℹ️'}</span>
+          <span className="toast__msg">{toast.message}</span>
+          {toast.type === 'error' && toast.message.includes('kota') && (
+            <a href="https://platform.openai.com/settings/billing" target="_blank" rel="noreferrer" className="toast__link" onClick={e => e.stopPropagation()}>Kredi Ekle →</a>
+          )}
+          <button className="toast__close">✕</button>
+        </div>
+      )}
       {/* Floating Örnek CV Kutucukları */}
       {mode === 'edit' && (
         <div className="floating-examples">
@@ -1585,6 +2097,51 @@ function App() {
         </div>
       )}
 
+      {/* Sol Sabit Panel: CV Doluluk + ATS Skoru */}
+      {mode === 'edit' && (() => {
+        const cColor = cvCompletion.percentage >= 80 ? '#22c55e' : cvCompletion.percentage >= 50 ? '#f59e0b' : '#ef4444'
+        const aColor = atsScore.score >= 75 ? '#22c55e' : atsScore.score >= 50 ? '#f59e0b' : '#ef4444'
+        const cDash = (cvCompletion.percentage / 100) * 150.8
+        const aDash = (atsScore.score / 100) * 150.8
+        return (
+          <div className="cv-stats-panel">
+            <div className="cv-stats-panel__item">
+              <div className="cv-stats-ring">
+                <svg viewBox="0 0 72 72" width="74" height="74">
+                  <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="7" />
+                  <circle cx="36" cy="36" r="30" fill="none" stroke={cColor} strokeWidth="7"
+                    strokeDasharray={`${(cvCompletion.percentage / 100) * 188.5} 188.5`} strokeLinecap="round" transform="rotate(-90 36 36)" />
+                </svg>
+                <div className="cv-stats-ring__text" style={{ color: cColor }}>
+                  %{cvCompletion.percentage}
+                </div>
+              </div>
+              <span className="cv-stats-panel__label">Doluluk</span>
+              {cvCompletion.missing.length > 0 && (
+                <span className="cv-stats-panel__sub">{cvCompletion.missing.length} eksik alan</span>
+              )}
+            </div>
+
+            <div className="cv-stats-panel__divider" />
+
+            <button className="cv-stats-panel__item cv-stats-panel__ats-btn" onClick={() => setShowAtsPanel(true)}>
+              <div className="cv-stats-ring">
+                <svg viewBox="0 0 72 72" width="74" height="74">
+                  <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="7" />
+                  <circle cx="36" cy="36" r="30" fill="none" stroke={aColor} strokeWidth="7"
+                    strokeDasharray={`${(atsScore.score / 100) * 188.5} 188.5`} strokeLinecap="round" transform="rotate(-90 36 36)" />
+                </svg>
+                <div className="cv-stats-ring__text" style={{ color: aColor }}>
+                  {atsScore.score}
+                </div>
+              </div>
+              <span className="cv-stats-panel__label">ATS Skoru</span>
+              <span className="cv-stats-panel__sub cv-stats-panel__sub--link">Detayları gör →</span>
+            </button>
+          </div>
+        )
+      })()}
+
       <header className="topbar">
         <div className="brand">
           <img src="/logo.png" alt="CV Creater Logo" className="brand__logo" />
@@ -1594,6 +2151,20 @@ function App() {
       </div>
         </div>
         <div className="topbar__actions">
+          <button
+            className={`btn-premium-badge ${aiAvailable ? 'btn-premium-badge--active' : ''}`}
+            onClick={() => setShowPremiumModal(true)}
+            title={aiAvailable ? 'AI özellikleri aktif' : 'AI özelliklerini etkinleştir'}
+          >
+            {aiAvailable ? '🤖 AI Aktif' : '👑 Premium'}
+          </button>
+          <button
+            className="btn ghost dark-toggle"
+            onClick={() => setDarkMode(d => !d)}
+            title={darkMode ? 'Aydınlık mod' : 'Karanlık mod'}
+          >
+            {darkMode ? '☀️' : '🌙'}
+          </button>
           {mode === 'edit' && (
             <button 
               className="btn ghost reset-btn" 
@@ -1748,13 +2319,30 @@ function App() {
                 />
               </div>
 
-              <Textarea
-                label="Kariyer Hedefi / Özet"
-                rows={3}
-                value={cvData.objective}
-                onChange={(v) => handleFieldChange('objective', v)}
-                placeholder="Kendinizi kısaca tanıtın ve kariyer hedeflerinizi belirtin..."
+              <Input
+                label="Website / LinkedIn URL (QR Kod için)"
+                value={cvData.websiteUrl || ''}
+                onChange={(v) => handleFieldChange('websiteUrl', v)}
+                placeholder="Örn: linkedin.com/in/adiniz veya github.com/adiniz"
               />
+
+              <div className="ai-field-wrapper">
+                <Textarea
+                  label="Kariyer Hedefi / Özet"
+                  rows={3}
+                  value={cvData.objective}
+                  onChange={(v) => handleFieldChange('objective', v)}
+                  placeholder="Kendinizi kısaca tanıtın ve kariyer hedeflerinizi belirtin..."
+                />
+                <button
+                  className={`btn-ai ${aiLoading === 'objective' ? 'loading' : ''}`}
+                  onClick={handleAiObjective}
+                  disabled={aiLoading === 'objective'}
+                  title="AI ile otomatik yaz"
+                >
+                  {aiLoading === 'objective' ? '⏳ Yazıyor...' : '✨ AI ile Yaz'}
+                </button>
+              </div>
             </FormSection>
 
             {/* Deneyimler */}
@@ -1805,6 +2393,21 @@ function App() {
                     onChange={(v) => handleDetailsChange('experience', item.id, v)}
                     placeholder="• Proje yönettim&#10;• Satışları %20 artırdım"
                   />
+                  {item.details.length > 0 && (
+                    <div className="ai-bullets-row">
+                      {item.details.map((bullet, bi) => (
+                        <button
+                          key={bi}
+                          className={`btn-ai btn-ai--small ${aiLoading === `bullet-${item.id}-${bi}` ? 'loading' : ''}`}
+                          onClick={() => handleAiImproveBullet(item.id, bi, bullet)}
+                          disabled={!!aiLoading}
+                          title={`"${bullet.slice(0, 40)}..." maddesini AI ile iyileştir`}
+                        >
+                          {aiLoading === `bullet-${item.id}-${bi}` ? '⏳' : '✨'} Madde {bi + 1}&apos;i İyileştir
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </FormSection>
@@ -1988,10 +2591,42 @@ function App() {
               ))}
             </FormSection>
 
+            {/* Referanslar */}
+            <FormSection
+              title="Referanslar"
+              icon="🤝"
+              onAdd={() => addItem('references', { name: '', title: '', company: '', phone: '', email: '' })}
+            >
+              {(cvData.references || []).map((item) => (
+                <div className="card" key={item.id}>
+                  <button className="card__remove" onClick={() => removeItem('references', item.id)} title="Sil">×</button>
+                  <div className="grid two">
+                    <Input label="Ad Soyad" value={item.name} onChange={(v) => handleArrayChange('references', item.id, 'name', v)} placeholder="Örn: Mehmet Yılmaz" />
+                    <Input label="Ünvan" value={item.title} onChange={(v) => handleArrayChange('references', item.id, 'title', v)} placeholder="Örn: Yazılım Müdürü" />
+                  </div>
+                  <div className="grid three">
+                    <Input label="Şirket" value={item.company} onChange={(v) => handleArrayChange('references', item.id, 'company', v)} placeholder="Örn: ABC Teknoloji" />
+                    <Input label="Telefon" value={item.phone} onChange={(v) => handleArrayChange('references', item.id, 'phone', v)} placeholder="Örn: 0532 xxx xx xx" />
+                    <Input label="E-posta" value={item.email} onChange={(v) => handleArrayChange('references', item.id, 'email', v)} placeholder="Örn: mehmet@abc.com" />
+                  </div>
+                </div>
+              ))}
+            </FormSection>
+
             {/* Beceriler */}
             <FormSection title="Teknik Beceriler" icon="⚡">
               <div className="skill-selector">
-                <p className="skill-selector__label">Meslek kategorisi seçin ve becerileri ekleyin:</p>
+                <div className="ai-skills-header">
+                  <p className="skill-selector__label">Meslek kategorisi seçin ve becerileri ekleyin:</p>
+                  <button
+                    className={`btn-ai ${aiLoading === 'skills' ? 'loading' : ''}`}
+                    onClick={handleAiSuggestSkills}
+                    disabled={!!aiLoading}
+                    title="Pozisyonunuza göre AI beceri önerisi alın"
+                  >
+                    {aiLoading === 'skills' ? '⏳ Öneriliyor...' : '✨ AI ile Öner'}
+                  </button>
+                </div>
                 <div className="category-tabs">
                   {Object.keys(skillCategories).map((cat) => (
                     <button
@@ -2311,10 +2946,7 @@ function App() {
                 <button className="btn ghost" onClick={() => setMode('edit')}>
                   ← Düzenlemeye dön
                 </button>
-                <button 
-                  className="btn primary" 
-                  onClick={handlePayment}
-                >
+                <button className="btn primary" onClick={handlePayment}>
                   📄 PDF İndir
                 </button>
               </>
@@ -2323,6 +2955,36 @@ function App() {
               <span className="example-badge">Örnek CV - Sadece Görüntüleme</span>
             )}
           </div>
+
+          <div className="preview-template-bar">
+            <span className="preview-template-bar__label">Şablon:</span>
+            {[
+              { id: 'classic', label: 'Klasik', icon: '📋' },
+              { id: 'modern', label: 'Modern', icon: '🗂️' },
+              { id: 'minimal', label: 'Minimal', icon: '🤍' },
+              { id: 'creative', label: 'Yaratıcı', icon: '🎨' },
+              { id: 'compact', label: 'Kompakt', icon: '⚡' },
+            ].map((t) => (
+              <button
+                key={t.id}
+                className={`preview-template-btn ${template === t.id ? 'active' : ''}`}
+                onClick={() => setTemplate(t.id)}
+              >
+                <span className="preview-template-btn__icon">{t.icon}</span>
+                <span className="preview-template-btn__name">{t.label}</span>
+              </button>
+            ))}
+            <div className="preview-template-bar__color">
+              <label htmlFor="accent-preview">🎨</label>
+              <input
+                id="accent-preview"
+                type="color"
+                value={cvData.accent}
+                onChange={(e) => handleFieldChange('accent', e.target.value)}
+              />
+            </div>
+          </div>
+
           <div className="cv-wrapper">
             {renderCv(cvRef)}
           </div>
@@ -2358,6 +3020,12 @@ function App() {
           title="Formu Sıfırla"
           message="Tüm form verilerini sıfırlamak istediğinize emin misiniz? Bu işlem geri alınamaz."
         />
+      )}
+      {showAtsPanel && (
+        <AtsModal score={atsScore} onClose={() => setShowAtsPanel(false)} />
+      )}
+      {showPremiumModal && (
+        <PremiumModal aiAvailable={aiAvailable} onClose={() => setShowPremiumModal(false)} onUpgrade={() => { setShowPremiumModal(false); handlePayment() }} />
       )}
     </div>
   )
@@ -2671,6 +3339,133 @@ function DateSelector({ label, day, month, year, onDayChange, onMonthChange, onY
             <option key={y} value={y}>{y}</option>
           ))}
         </select>
+      </div>
+    </div>
+  )
+}
+
+function PremiumModal({ onClose, aiAvailable }) {
+  const features = [
+    { icon: '✨', title: 'AI ile Kariyer Hedefi', desc: 'Tek tıkla profesyonel özet oluştur', ai: true },
+    { icon: '⚡', title: 'AI Beceri Önerisi', desc: 'Pozisyonuna göre beceri listesi al', ai: true },
+    { icon: '🔥', title: 'AI Deneyim İyileştirme', desc: 'Her maddeyi güçlü cümlelerle yenile', ai: true },
+    { icon: '📄', title: '5 Farklı Şablon', desc: 'Tüm CV tasarımlarını kullan', ai: false },
+    { icon: '🎯', title: 'ATS Uyum Skoru', desc: 'Gerçek zamanlı analiz', ai: false },
+    { icon: '📊', title: 'CV Doluluk Takibi', desc: 'Ne kadar eksiğin var gör', ai: false },
+    { icon: '🔗', title: 'QR Kod', desc: 'LinkedIn/GitHub bağlantısı', ai: false },
+    { icon: '👥', title: 'Referanslar Bölümü', desc: 'Referans kişilerini ekle', ai: false },
+  ]
+
+  return (
+    <div className="login-modal-overlay" onClick={onClose}>
+      <div className="premium-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="login-modal__close premium-modal__close" onClick={onClose}>×</button>
+        <div className="premium-modal__header">
+          <span className="premium-modal__crown">{aiAvailable ? '🤖' : '👑'}</span>
+          <h2>CV Creater {aiAvailable ? 'AI Aktif' : 'Premium'}</h2>
+          <p>{aiAvailable ? 'Tüm AI özellikleri kullanıma hazır!' : 'AI destekli özelliklerle CV\'nizi bir üst seviyeye taşıyın'}</p>
+        </div>
+        <div className="premium-modal__features">
+          {features.map((f, i) => {
+            const isUnlocked = !f.ai || aiAvailable
+            return (
+              <div key={i} className={`premium-modal__feature ${!isUnlocked ? 'premium-modal__feature--premium' : ''}`}>
+                <span className="premium-modal__feature-icon">{f.icon}</span>
+                <div>
+                  <p className="premium-modal__feature-title">{f.title} {f.ai && <span className="ai-tag">AI</span>}</p>
+                  <p className="premium-modal__feature-desc">{f.desc}</p>
+                </div>
+                <span className={`premium-modal__feature-status ${isUnlocked ? 'free' : 'locked'}`}>
+                  {isUnlocked ? '✓ Aktif' : '🔒 API Key Gerekli'}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+        {aiAvailable ? (
+          <div className="premium-modal__pricing premium-modal__pricing--active">
+            <div className="premium-modal__active-badge">✅ AI Bağlantısı Aktif</div>
+            <p className="premium-modal__price-note">Sunucunuzda OpenAI API Key tanımlı. Tüm AI özellikleri çalışıyor.</p>
+            <button className="btn primary premium-modal__btn" onClick={onClose}>Düzenlemeye Devam Et</button>
+          </div>
+        ) : (
+          <div className="premium-modal__pricing">
+            <p className="premium-modal__price-note">AI özelliklerini kullanmak için sunucunuzdaki <code>.env</code> dosyasına <code>OPENAI_API_KEY</code> ekleyin.</p>
+            <a
+              href="https://platform.openai.com/api-keys"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn primary premium-modal__btn"
+            >
+              OpenAI API Key Oluştur →
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AtsModal({ score, onClose }) {
+  const { score: s, issues, tips } = score
+  const color = s >= 75 ? '#22c55e' : s >= 50 ? '#f59e0b' : '#ef4444'
+  const label = s >= 75 ? 'İyi' : s >= 50 ? 'Orta' : 'Zayıf'
+
+  return (
+    <div className="login-modal-overlay" onClick={onClose}>
+      <div className="ats-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="ats-modal__header">
+          <h3>ATS Uyum Skoru</h3>
+          <button className="login-modal__close" onClick={onClose}>×</button>
+        </div>
+        <div className="ats-modal__body">
+          <div className="ats-modal__score-ring">
+            <svg viewBox="0 0 100 100" width="120" height="120">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#e5e7eb" strokeWidth="10" />
+              <circle
+                cx="50" cy="50" r="42" fill="none"
+                stroke={color} strokeWidth="10"
+                strokeDasharray={`${(s / 100) * 263.9} 263.9`}
+                strokeLinecap="round"
+                transform="rotate(-90 50 50)"
+              />
+            </svg>
+            <div className="ats-modal__score-text">
+              <span className="ats-modal__score-number" style={{ color }}>{s}</span>
+              <span className="ats-modal__score-label" style={{ color }}>{label}</span>
+            </div>
+          </div>
+
+          <p className="ats-modal__desc">ATS (Başvuru Takip Sistemi) tarama skoru — değer ne kadar yüksekse CV&apos;niz otomatik sistemlerden o kadar kolay geçer.</p>
+
+          {issues.length > 0 && (
+            <div className="ats-modal__section">
+              <h4 className="ats-modal__section-title ats-modal__section-title--error">Kritik Eksikler</h4>
+              {issues.map((issue, i) => (
+                <div key={i} className="ats-modal__item ats-modal__item--error">
+                  <span>✗</span> {issue}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tips.length > 0 && (
+            <div className="ats-modal__section">
+              <h4 className="ats-modal__section-title ats-modal__section-title--warn">İyileştirme Önerileri</h4>
+              {tips.map((tip, i) => (
+                <div key={i} className="ats-modal__item ats-modal__item--warn">
+                  <span>⚡</span> {tip}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {issues.length === 0 && tips.length === 0 && (
+            <div className="ats-modal__item ats-modal__item--success">
+              <span>✓</span> CV&apos;niz ATS sistemleri için mükemmel durumda!
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -57,3 +57,17 @@ p, span, div, a {
 a {
   color: inherit;
 }
+
+/* Dark Mode */
+html.dark {
+  --color-dark: #e8dece;
+  --color-medium: #8a7a68;
+  --color-light: #1c1d2a;
+  background-color: #1c1d2a;
+}
+html.dark body {
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255, 109, 31, 0.06), transparent 35%),
+    radial-gradient(circle at 80% 10%, rgba(255, 109, 31, 0.03), transparent 40%),
+    #1c1d2a;
+}
