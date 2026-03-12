@@ -2097,51 +2097,6 @@ function App() {
         </div>
       )}
 
-      {/* Sol Sabit Panel: CV Doluluk + ATS Skoru */}
-      {mode === 'edit' && (() => {
-        const cColor = cvCompletion.percentage >= 80 ? '#22c55e' : cvCompletion.percentage >= 50 ? '#f59e0b' : '#ef4444'
-        const aColor = atsScore.score >= 75 ? '#22c55e' : atsScore.score >= 50 ? '#f59e0b' : '#ef4444'
-        const cDash = (cvCompletion.percentage / 100) * 150.8
-        const aDash = (atsScore.score / 100) * 150.8
-        return (
-          <div className="cv-stats-panel">
-            <div className="cv-stats-panel__item">
-              <div className="cv-stats-ring">
-                <svg viewBox="0 0 72 72" width="74" height="74">
-                  <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="7" />
-                  <circle cx="36" cy="36" r="30" fill="none" stroke={cColor} strokeWidth="7"
-                    strokeDasharray={`${(cvCompletion.percentage / 100) * 188.5} 188.5`} strokeLinecap="round" transform="rotate(-90 36 36)" />
-                </svg>
-                <div className="cv-stats-ring__text" style={{ color: cColor }}>
-                  %{cvCompletion.percentage}
-                </div>
-              </div>
-              <span className="cv-stats-panel__label">Doluluk</span>
-              {cvCompletion.missing.length > 0 && (
-                <span className="cv-stats-panel__sub">{cvCompletion.missing.length} eksik alan</span>
-              )}
-            </div>
-
-            <div className="cv-stats-panel__divider" />
-
-            <button className="cv-stats-panel__item cv-stats-panel__ats-btn" onClick={() => setShowAtsPanel(true)}>
-              <div className="cv-stats-ring">
-                <svg viewBox="0 0 72 72" width="74" height="74">
-                  <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="7" />
-                  <circle cx="36" cy="36" r="30" fill="none" stroke={aColor} strokeWidth="7"
-                    strokeDasharray={`${(atsScore.score / 100) * 188.5} 188.5`} strokeLinecap="round" transform="rotate(-90 36 36)" />
-                </svg>
-                <div className="cv-stats-ring__text" style={{ color: aColor }}>
-                  {atsScore.score}
-                </div>
-              </div>
-              <span className="cv-stats-panel__label">ATS Skoru</span>
-              <span className="cv-stats-panel__sub cv-stats-panel__sub--link">Detayları gör →</span>
-            </button>
-          </div>
-        )
-      })()}
-
       <header className="topbar">
         <div className="brand">
           <img src="/logo.png" alt="CV Creater Logo" className="brand__logo" />
@@ -2220,6 +2175,51 @@ function App() {
 
       {mode === 'edit' && (
         <>
+          {/* Doluluk + ATS Skoru Paneli */}
+          {(() => {
+            const cColor = cvCompletion.percentage >= 80 ? '#22c55e' : cvCompletion.percentage >= 50 ? '#f59e0b' : '#ef4444'
+            const aColor = atsScore.score >= 75 ? '#22c55e' : atsScore.score >= 50 ? '#f59e0b' : '#ef4444'
+            return (
+              <div className="cv-stats-panel">
+                <div className="cv-stats-panel__item">
+                  <div className="cv-stats-ring">
+                    <svg viewBox="0 0 72 72" width="74" height="74">
+                      <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="7" />
+                      <circle cx="36" cy="36" r="30" fill="none" stroke={cColor} strokeWidth="7"
+                        strokeDasharray={`${(cvCompletion.percentage / 100) * 188.5} 188.5`} strokeLinecap="round" transform="rotate(-90 36 36)" />
+                    </svg>
+                    <div className="cv-stats-ring__text" style={{ color: cColor }}>
+                      %{cvCompletion.percentage}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="cv-stats-panel__label">Doluluk</span>
+                    {cvCompletion.missing.length > 0 && (
+                      <span className="cv-stats-panel__sub">{cvCompletion.missing.length} eksik alan</span>
+                    )}
+                  </div>
+                </div>
+                <div className="cv-stats-panel__divider" />
+                <button className="cv-stats-panel__item cv-stats-panel__ats-btn" onClick={() => setShowAtsPanel(true)}>
+                  <div className="cv-stats-ring">
+                    <svg viewBox="0 0 72 72" width="74" height="74">
+                      <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="7" />
+                      <circle cx="36" cy="36" r="30" fill="none" stroke={aColor} strokeWidth="7"
+                        strokeDasharray={`${(atsScore.score / 100) * 188.5} 188.5`} strokeLinecap="round" transform="rotate(-90 36 36)" />
+                    </svg>
+                    <div className="cv-stats-ring__text" style={{ color: aColor }}>
+                      {atsScore.score}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="cv-stats-panel__label">ATS Skoru</span>
+                    <span className="cv-stats-panel__sub cv-stats-panel__sub--link">Detayları gör →</span>
+                  </div>
+                </button>
+              </div>
+            )
+          })()}
+
           <div className="edit-layout">
             <main className="editor" onClickCapture={handleEditorClickCapture}>
             {/* Fotoğraf Yükleme */}
