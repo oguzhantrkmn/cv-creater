@@ -307,6 +307,8 @@ function App() {
   const [aiAvailable, setAiAvailable] = useState(false)
   const [aiLoading, setAiLoading] = useState('')
   const [toast, setToast] = useState(null)
+  const [cvParseLoading, setCvParseLoading] = useState(false)
+  const cvUploadRef = useRef(null)
 
   // PDF dosya adı
   const pdfFileName = useMemo(
@@ -319,6 +321,57 @@ function App() {
     setToast({ message, type })
     setTimeout(() => setToast(null), 5000)
   }, [])
+
+  // AI: CV dosyasını yükle ve parse et
+  const handleCvFileUpload = useCallback(async (file) => {
+    if (!file) return
+    if (!aiAvailable) {
+      showToast('AI özelliği aktif değil. Sunucuda OPENAI_API_KEY gerekli.', 'warning')
+      return
+    }
+    const allowed = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword']
+    if (!allowed.includes(file.type)) {
+      showToast('Sadece PDF veya Word (.docx) dosyası yükleyebilirsiniz.', 'warning')
+      return
+    }
+    setCvParseLoading(true)
+    try {
+      const formData = new FormData()
+      formData.append('cv', file)
+      const res = await fetch(`${API_URL}/api/ai/parse-cv`, { method: 'POST', body: formData })
+      const json = await res.json()
+      if (json.error) { showToast(json.error); return }
+
+      const d = json.data
+      // Mevcut CV verisini yapay zekanın bulduklarıyla birleştir
+      setCvData(prev => ({
+        ...prev,
+        name:        d.name        || prev.name,
+        title:       d.title       || prev.title,
+        email:       d.email       || prev.email,
+        phone:       d.phone       || prev.phone,
+        city:        d.city        || prev.city,
+        district:    d.district    || prev.district,
+        birthDay:    d.birthDay    || prev.birthDay,
+        birthMonth:  d.birthMonth  || prev.birthMonth,
+        birthYear:   d.birthYear   || prev.birthYear,
+        websiteUrl:  d.websiteUrl  || prev.websiteUrl,
+        objective:   d.objective   || prev.objective,
+        skills:      d.skills?.length      ? d.skills      : prev.skills,
+        languages:   d.languages?.length   ? d.languages.map((l, i) => ({ id: Date.now() + i, name: l.name || l, level: l.level || '' })) : prev.languages,
+        experience:  d.experience?.length  ? d.experience.map((e, i) => ({ id: Date.now() + i + 100, company: e.company || '', position: e.position || '', startDate: e.startDate || '', endDate: e.endDate || '', details: e.details || [] })) : prev.experience,
+        education:   d.education?.length   ? d.education.map((e, i) => ({ id: Date.now() + i + 200, school: e.school || '', department: e.department || '', degree: e.degree || '', startDate: e.startDate || '', endDate: e.endDate || '', gpa: e.gpa || '' })) : prev.education,
+        certificates: d.certificates?.length ? d.certificates.map((c, i) => ({ id: Date.now() + i + 300, name: c.name || c, issuer: c.issuer || '', date: c.date || '' })) : prev.certificates,
+        references:  d.references?.length  ? d.references.map((r, i) => ({ id: Date.now() + i + 400, name: r.name || '', title: r.title || '', company: r.company || '', phone: r.phone || '', email: r.email || '' })) : prev.references,
+      }))
+      showToast('CV başarıyla okundu ve form dolduruldu!', 'info')
+    } catch {
+      showToast('Bağlantı hatası. Sunucuyu kontrol edin.')
+    } finally {
+      setCvParseLoading(false)
+      if (cvUploadRef.current) cvUploadRef.current.value = ''
+    }
+  }, [aiAvailable, showToast])
 
   const atsScore = useMemo(() => {
     let score = 0
@@ -2075,6 +2128,36 @@ function App() {
           <button className="toast__close">✕</button>
         </div>
       )}
+      {/* CV Yükle (AI Parse) */}
+      {mode === 'edit' && (
+        <div className="cv-upload-bar">
+          <input
+            ref={cvUploadRef}
+            type="file"
+            accept=".pdf,.doc,.docx"
+            style={{ display: 'none' }}
+            onChange={e => handleCvFileUpload(e.target.files?.[0])}
+          />
+          <div className="cv-upload-bar__info">
+            <span className="cv-upload-bar__icon">📄</span>
+            <div>
+              <p className="cv-upload-bar__title">Mevcut CV&apos;nizi Yükleyin</p>
+              <p className="cv-upload-bar__desc">PDF veya Word dosyanızı yükleyin, AI tüm alanları otomatik doldursun</p>
+            </div>
+          </div>
+          <button
+            className={`btn-cv-upload ${cvParseLoading ? 'loading' : ''} ${!aiAvailable ? 'disabled' : ''}`}
+            onClick={() => aiAvailable ? cvUploadRef.current?.click() : showToast('AI aktif değil. Sunucuda OPENAI_API_KEY gerekli.', 'warning')}
+            disabled={cvParseLoading}
+            title={aiAvailable ? 'CV yükle ve otomatik doldur' : 'AI özelliği aktif değil'}
+          >
+            {cvParseLoading
+              ? <><span className="spinner" />AI Okuyor...</>
+              : <>{aiAvailable ? '✨' : '🔒'} CV Yükle &amp; Doldur</>}
+          </button>
+        </div>
+      )}
+
       {/* Floating Örnek CV Kutucukları */}
       {mode === 'edit' && (
         <div className="floating-examples">

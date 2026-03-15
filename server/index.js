@@ -8,6 +8,9 @@ import passport from 'passport'
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
 import jwt from 'jsonwebtoken'
 import OpenAI from 'openai'
+import multer from 'multer'
+import mammoth from 'mammoth'
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 
 dotenv.config()
 
@@ -465,9 +468,124 @@ app.get('/api/check-payment/:sessionId', async (req, res) => {
 
 // ===== AI ENDPOINTLERİ =====
 
+// Multer - bellekte tut (diske yazma)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword']
+    if (allowed.includes(file.mimetype)) cb(null, true)
+    else cb(new Error('Sadece PDF veya Word (.docx) dosyası yükleyebilirsiniz.'))
+  }
+})
+
 // AI durum kontrolü
 app.get('/api/ai/status', (req, res) => {
   res.json({ available: !!openai })
+})
+
+// AI: CV Dosyası Yükle ve Parse Et
+app.post('/api/ai/parse-cv', upload.single('cv'), async (req, res) => {
+  if (!openai) return res.status(503).json({ error: 'AI yapılandırılmamış. Lütfen OPENAI_API_KEY ekleyin.' })
+  if (!req.file) return res.status(400).json({ error: 'Dosya yüklenmedi.' })
+
+  try {
+    // Dosya içeriğini metin olarak çıkar
+    let text = ''
+    if (req.file.mimetype === 'application/pdf') {
+      try {
+        const uint8 = new Uint8Array(req.file.buffer)
+        const loadingTask = pdfjsLib.getDocument({ data: uint8, useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true })
+        const pdf = await loadingTask.promise
+        const pages = []
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i)
+          const content = await page.getTextContent()
+          pages.push(content.items.map(item => item.str).join(' '))
+        }
+        text = pages.join('\n')
+        console.log(`PDF okundu: ${pdf.numPages} sayfa, ${text.length} karakter`)
+      } catch (pdfErr) {
+        console.error('PDF parse error:', pdfErr.message)
+        return res.status(400).json({ error: 'PDF okunamadı. Dosyanızı Word (.docx) formatında deneyin.' })
+      }
+    } else {
+      const result = await mammoth.extractRawText({ buffer: req.file.buffer })
+      text = result.value
+    }
+
+    if (!text || text.trim().length < 50) {
+      return res.status(400).json({ error: 'CV dosyasından metin okunamadı. Lütfen metin tabanlı bir PDF veya Word dosyası kullanın.' })
+    }
+
+    // Metni 6000 karakterle sınırla (token tasarrufu)
+    const truncated = text.slice(0, 6000)
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `Aşağıdaki CV metnini analiz et ve JSON formatında yapılandırılmış veri döndür.
+
+CV METNİ:
+${truncated}
+
+Şu JSON yapısını döndür (Türkçe veya İngilizce CV olabilir, tüm alanları doldurmaya çalış, bulamazsan boş bırak):
+{
+  "name": "Ad Soyad",
+  "title": "Ünvan / Pozisyon",
+  "email": "email@ornek.com",
+  "phone": "telefon numarası",
+  "city": "Şehir",
+  "district": "İlçe (varsa)",
+  "birthDay": "gün sayısı veya boş",
+  "birthMonth": "ay adı Türkçe (Ocak, Şubat vb.) veya boş",
+  "birthYear": "yıl veya boş",
+  "websiteUrl": "website veya LinkedIn URL",
+  "objective": "Kariyer hedefi veya özet paragrafı",
+  "skills": ["beceri1", "beceri2"],
+  "languages": [{"name": "Dil", "level": "Seviye"}],
+  "experience": [
+    {
+      "company": "Şirket Adı",
+      "position": "Pozisyon",
+      "startDate": "Başlangıç tarihi",
+      "endDate": "Bitiş tarihi veya Devam Ediyor",
+      "details": ["madde1", "madde2"]
+    }
+  ],
+  "education": [
+    {
+      "school": "Okul Adı",
+      "department": "Bölüm",
+      "degree": "Derece (Lisans, Yüksek Lisans vb.)",
+      "startDate": "Başlangıç",
+      "endDate": "Bitiş veya Devam Ediyor",
+      "gpa": "Not ortalaması (varsa)"
+    }
+  ],
+  "certificates": [{"name": "Sertifika adı", "issuer": "Veren kurum", "date": "Tarih"}],
+  "references": [{"name": "Ad Soyad", "title": "Ünvan", "company": "Şirket", "phone": "", "email": ""}]
+}
+
+Sadece geçerli JSON döndür, başka açıklama ekleme.`
+      }],
+      max_tokens: 2000,
+      temperature: 0.1,
+      response_format: { type: 'json_object' }
+    })
+
+    const raw = completion.choices[0].message.content.trim()
+    const parsed = JSON.parse(raw)
+    res.json({ data: parsed })
+
+  } catch (err) {
+    console.error('CV parse error:', err)
+    const msg = err.status === 429
+      ? 'OpenAI kota aşıldı. Lütfen platform.openai.com adresinden hesabınıza kredi ekleyin.'
+      : err.status === 401 ? 'OpenAI API Key geçersiz.' : err.message
+    res.status(err.status || 500).json({ error: msg })
+  }
 })
 
 // AI: Kariyer Hedefi Oluştur

@@ -57,6 +57,107 @@ html.dark .toast--error   { background: #450a0a; color: #fca5a5; border-color: #
 html.dark .toast--warning { background: #422006; color: #fde047; border-color: #713f12; }
 html.dark .toast--info    { background: #0c1a2e; color: #93c5fd; border-color: #1e3a5f; }
 
+/* ===== CV YÜKLEME BARI ===== */
+.cv-upload-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: linear-gradient(135deg, rgba(255,109,31,0.08), rgba(255,180,0,0.06));
+  border: 1.5px dashed rgba(255,109,31,0.4);
+  border-radius: 16px;
+  padding: 16px 20px;
+  transition: border-color 0.2s, background 0.2s;
+}
+.cv-upload-bar:hover {
+  border-color: rgba(255,109,31,0.7);
+  background: linear-gradient(135deg, rgba(255,109,31,0.12), rgba(255,180,0,0.09));
+}
+.cv-upload-bar__info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+.cv-upload-bar__icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+.cv-upload-bar__title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--color-dark);
+  margin-bottom: 2px;
+}
+.cv-upload-bar__desc {
+  font-size: 0.8rem;
+  color:#000000;
+  line-height: 1.4;
+}
+.btn-cv-upload {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #FF6D1F, #ff9a4d);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: opacity 0.2s, transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 4px 14px rgba(255,109,31,0.35);
+}
+.btn-cv-upload:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(255,109,31,0.45);
+}
+.btn-cv-upload:disabled,
+.btn-cv-upload.loading {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+.btn-cv-upload.disabled {
+  background: #9ca3af;
+  box-shadow: none;
+}
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+html.dark .cv-upload-bar {
+  background: linear-gradient(135deg, rgba(255,109,31,0.1), rgba(255,180,0,0.07));
+  border-color: rgba(255,109,31,0.3);
+}
+html.dark .cv-upload-bar__title { color: var(--color-dark); }
+html.dark .cv-upload-bar__desc  { color: rgba(232,222,206,0.6); }
+
+@media (max-width: 640px) {
+  .cv-upload-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .btn-cv-upload {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 .reset-btn {
   font-size: 13px;
   padding: 8px 14px;
