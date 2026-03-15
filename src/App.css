@@ -178,19 +178,29 @@ html.dark .cv-upload-bar__desc  { color: rgba(232,222,206,0.6); }
   transform: translateY(-50%);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
   z-index: 100;
+  background: rgba(22, 24, 35, 0.96);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 24px;
+  padding: 22px 18px;
+  min-width: 130px;
+  box-shadow:
+    0 16px 48px rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 0 0 1px rgba(255,109,31,0.08);
 }
 
 .floating-examples__label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  color: var(--color-dark);
+  color: rgba(255,255,255,0.55);
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   text-align: center;
   margin-bottom: 4px;
-  opacity: 0.8;
 }
 
 .floating-card {
@@ -199,42 +209,87 @@ html.dark .cv-upload-bar__desc  { color: rgba(232,222,206,0.6); }
   align-items: center;
   gap: 6px;
   padding: 14px 16px;
-  background: rgba(34, 40, 49, 0.9);
-  border: 2px solid var(--card-color);
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1.5px solid color-mix(in srgb, var(--card-color) 50%, transparent);
   border-radius: 16px;
   cursor: pointer;
   transition: all 0.3s ease;
   animation: floatCard 3s ease-in-out infinite;
   animation-delay: var(--card-delay);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px color-mix(in srgb, var(--card-color) 30%, transparent);
+  position: relative;
+  overflow: hidden;
+  /* Neon glow */
+  box-shadow:
+    0 4px 16px rgba(0,0,0,0.4),
+    0 0 12px color-mix(in srgb, var(--card-color) 25%, transparent),
+    inset 0 1px 0 rgba(255,255,255,0.07);
+}
+
+/* Neon üst çizgi */
+.floating-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 10%; right: 10%;
+  height: 1.5px;
+  background: linear-gradient(90deg, transparent, var(--card-color), transparent);
+  opacity: 0.8;
+  border-radius: 50%;
+}
+
+/* Neon alt parıltı */
+.floating-card::after {
+  content: '';
+  position: absolute;
+  bottom: -20px; left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 30px;
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--card-color) 40%, transparent), transparent 70%);
+  filter: blur(8px);
+  pointer-events: none;
 }
 
 .floating-card:hover {
-  transform: scale(1.1) translateX(-10px);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 30px color-mix(in srgb, var(--card-color) 50%, transparent);
-  background: rgba(57, 62, 70, 0.95);
+  transform: scale(1.07) translateX(-6px);
+  background: rgba(255,255,255,0.08);
+  border-color: var(--card-color);
+  box-shadow:
+    0 8px 28px rgba(0,0,0,0.5),
+    0 0 24px color-mix(in srgb, var(--card-color) 55%, transparent),
+    0 0 48px color-mix(in srgb, var(--card-color) 20%, transparent),
+    inset 0 1px 0 rgba(255,255,255,0.12);
 }
 
 .floating-card__icon {
   font-size: 28px;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--card-color) 70%, transparent));
+  transition: filter 0.3s;
+}
+
+.floating-card:hover .floating-card__icon {
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--card-color) 90%, transparent));
 }
 
 .floating-card__title {
   font-size: 11px;
   font-weight: 700;
-  color: var(--color-light);
+  color: rgba(255,255,255,0.85);
   white-space: nowrap;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--card-color) 60%, transparent);
+}
+
+/* Neon divider */
+.floating-examples__divider {
+  width: 70%;
+  height: 1px;
+  background: rgba(255,255,255,0.1);
+  margin: 2px 0;
 }
 
 @keyframes floatCard {
-  0%, 100% {
-    transform: translateY(0) translateX(0);
-  }
-  50% {
-    transform: translateY(-8px) translateX(-4px);
-  }
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-6px); }
 }
 
 @media (max-width: 1400px) {
@@ -244,16 +299,20 @@ html.dark .cv-upload-bar__desc  { color: rgba(232,222,206,0.6); }
     flex-direction: row;
     justify-content: center;
     flex-wrap: wrap;
-    margin-bottom: 10px;
+    border-radius: 16px;
+    padding: 14px 16px;
+    min-width: unset;
+    gap: 8px;
   }
-
   .floating-card {
     animation: none;
+    width: auto;
+    padding: 10px 14px;
   }
-
   .floating-card:hover {
-    transform: scale(1.05);
+    transform: scale(1.06) translateX(0);
   }
+  .floating-examples__divider { display: none; }
 }
 
 .topbar {
@@ -2485,7 +2544,10 @@ html.dark .template-selector {
   border: 1px solid rgba(255,255,255,0.15);
   border-radius: 24px;
   padding: 22px 18px;
-  box-shadow: 0 16px 48px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
+  box-shadow:
+    0 16px 48px rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 0 0 1px rgba(255,109,31,0.08);
   min-width: 130px;
 }
 .cv-stats-panel__item {
