@@ -758,74 +758,96 @@ function App() {
     }
   }, [pdfFileName])
 
-  // Ödeme başarılı işleme fonksiyonu
-  const handlePaymentSuccess = useCallback(async (sessionId) => {
-    try {
-      // Önce localStorage'dan cvData'yı yükle (eğer varsa)
-      const savedCvData = localStorage.getItem('cvDataForPayment')
-      if (savedCvData) {
-        try {
-          const parsedData = JSON.parse(savedCvData)
-          setCvData(parsedData)
-        } catch (error) {
-          console.error('CV data yüklenemedi:', error)
+  // PayTR: ödeme sonrası doğrula, gerekirse CV kaydet, PDF indir
+  const handlePaytrSuccess = useCallback(
+    async (merchantOid, planHint) => {
+      try {
+        const savedCvData = localStorage.getItem('cvDataForPayment')
+        if (savedCvData) {
+          try {
+            setCvData(JSON.parse(savedCvData))
+          } catch (error) {
+            console.error('CV data yüklenemedi:', error)
+          }
         }
-      }
-      
-      // Ödeme durumunu kontrol et
-      const response = await fetch(`${API_URL}/api/check-payment/${sessionId}`)
-      
-      if (!response.ok) {
-        throw new Error('Ödeme durumu kontrol edilemedi')
-      }
-      
-      const data = await response.json()
-      
-      if (data.paid) {
-        // Ödeme başarılı - localStorage'a kaydet
-        localStorage.setItem('paidSessionId', sessionId)
+
+        let paid = false
+        let plan = planHint || localStorage.getItem('paytr_plan') || 'download_only'
+        for (let i = 0; i < 30; i++) {
+          const response = await fetch(`${API_URL}/api/paytr/verify/${encodeURIComponent(merchantOid)}`)
+          const data = await response.json()
+          if (data.paid) {
+            paid = true
+            plan = data.plan || plan
+            break
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+        }
+
+        if (!paid) {
+          alert(
+            'Ödeme onayı sunucudan henüz gelmedi. PayTR bildirim URL ayarını kontrol edin veya bir dakika sonra sayfayı yenileyin.'
+          )
+          return
+        }
+
         localStorage.setItem('paidTimestamp', Date.now().toString())
-        
-        // Preview moduna geç (PDF render için gerekli)
         setMode('preview')
         setHasPaid(true)
-        
-        // DOM'un render olması için bekle, sonra PDF'i indir
+
+        if (plan === 'save_download' && savedCvData) {
+          const token = localStorage.getItem('cvToken')
+          if (token) {
+            try {
+              const cv = JSON.parse(savedCvData)
+              const res = await fetch(`${API_URL}/api/cv`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ title: cv.name || 'CV', data: cv }),
+              })
+              if (res.ok) {
+                const refresh = await fetch(`${API_URL}/api/cv`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                })
+                if (refresh.ok) {
+                  const list = await refresh.json()
+                  setUserCvs(Array.isArray(list.cvs) ? list.cvs : [])
+                }
+              }
+            } catch (e) {
+              console.error('CV kayıt hatası:', e)
+            }
+          }
+        }
+
         setTimeout(async () => {
-          // cvRef'in hazır olmasını bekle
           let retries = 0
-          const maxRetries = 15
-          
-          while (!cvRef.current && retries < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, 300))
+          while (!cvRef.current && retries < 15) {
+            await new Promise((resolve) => setTimeout(resolve, 300))
             retries++
           }
-          
           if (cvRef.current) {
             await exportToPdf()
             setHasPaid(false)
-            // localStorage'dan temizle
-            localStorage.removeItem('paidSessionId')
+            localStorage.removeItem('paytr_merchant_oid')
+            localStorage.removeItem('paytr_plan')
             localStorage.removeItem('paidTimestamp')
             localStorage.removeItem('cvDataForPayment')
           } else {
-            console.error('CV ref bulunamadı')
-            alert('✅ Ödeme başarılı! Ancak PDF otomatik indirilemedi. Lütfen "PDF İndir" butonuna tıklayın.')
+            alert('Ödeme başarılı! PDF otomatik inmedi; Canlı Önizleme üzerinden tekrar deneyin.')
           }
         }, 2500)
-      } else {
-        alert('Ödeme durumu kontrol edilemedi. Lütfen tekrar deneyin.')
+      } catch (error) {
+        console.error('PayTR success handler:', error)
+        alert('Ödeme doğrulanamadı.')
         localStorage.removeItem('cvDataForPayment')
       }
-      
-      // URL'yi temizle
-      window.history.replaceState({}, document.title, window.location.pathname)
-    } catch (error) {
-      console.error('Payment check error:', error)
-      alert('Ödeme doğrulanamadı. Lütfen tekrar deneyin.')
-      localStorage.removeItem('cvDataForPayment')
-    }
-  }, [exportToPdf])
+    },
+    [exportToPdf]
+  )
 
   // Sayfa yüklendiğinde localStorage'dan cvData'yı yükle
   useEffect(() => {
@@ -840,75 +862,28 @@ function App() {
     }
   }, [])
 
-  // URL'den ödeme başarılı parametresini kontrol et
+  // URL'den PayTR dönüşünü işle
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search)
     const paymentStatus = urlParams.get('payment')
-    const sessionId = urlParams.get('session_id')
-    
-    if (paymentStatus === 'success' && sessionId) {
-      // Önce localStorage'dan cvData'yı yükle
-      const savedCvData = localStorage.getItem('cvDataForPayment')
-      if (savedCvData) {
-        try {
-          const parsedData = JSON.parse(savedCvData)
-          setCvData(parsedData)
-          // Kısa bir bekleme - state güncellenmesi için
-          setTimeout(() => {
-            handlePaymentSuccess(sessionId)
-          }, 100)
-        } catch (error) {
-          console.error('CV data yüklenemedi:', error)
-          handlePaymentSuccess(sessionId)
-        }
-      } else {
-        handlePaymentSuccess(sessionId)
-      }
-    } else if (paymentStatus === 'cancel') {
-      alert('Ödeme iptal edildi.')
-      // localStorage'dan temizle
-      localStorage.removeItem('cvDataForPayment')
-      // URL'yi temizle
+
+    if (paymentStatus === 'paytr_ok') {
+      const oid = localStorage.getItem('paytr_merchant_oid')
+      const plan = localStorage.getItem('paytr_plan')
       window.history.replaceState({}, document.title, window.location.pathname)
-    } else {
-      // Sayfa yenilendiğinde localStorage'dan kontrol et
-      const savedSessionId = localStorage.getItem('paidSessionId')
-      const paidTimestamp = localStorage.getItem('paidTimestamp')
-      
-      if (savedSessionId && paidTimestamp) {
-        const timeDiff = Date.now() - parseInt(paidTimestamp)
-        // 5 dakika içindeyse PDF'i indir
-        if (timeDiff < 5 * 60 * 1000) {
-          // cvData'yı yükle
-          const savedCvData = localStorage.getItem('cvDataForPayment')
-          if (savedCvData) {
-            try {
-              const parsedData = JSON.parse(savedCvData)
-              setCvData(parsedData)
-            } catch (error) {
-              console.error('CV data yüklenemedi:', error)
-            }
-          }
-          setMode('preview')
-          setHasPaid(true)
-          setTimeout(async () => {
-            if (cvRef.current) {
-              await exportToPdf()
-              setHasPaid(false)
-              localStorage.removeItem('paidSessionId')
-              localStorage.removeItem('paidTimestamp')
-              localStorage.removeItem('cvDataForPayment')
-            }
-          }, 1000)
-        } else {
-          // Süresi dolmuş, temizle
-          localStorage.removeItem('paidSessionId')
-          localStorage.removeItem('paidTimestamp')
-          localStorage.removeItem('cvDataForPayment')
-        }
+      if (oid) {
+        setTimeout(() => handlePaytrSuccess(oid, plan), 100)
+      } else {
+        alert('Oturum bilgisi bulunamadı. Lütfen tekrar ödeme yapın.')
       }
+    } else if (paymentStatus === 'paytr_fail') {
+      alert('Ödeme tamamlanamadı veya iptal edildi.')
+      localStorage.removeItem('cvDataForPayment')
+      localStorage.removeItem('paytr_merchant_oid')
+      localStorage.removeItem('paytr_plan')
+      window.history.replaceState({}, document.title, window.location.pathname)
     }
-  }, [handlePaymentSuccess, exportToPdf])
+  }, [handlePaytrSuccess, exportToPdf])
 
   const handlePayment = async () => {
     // PDF indirme modalını aç
@@ -923,70 +898,66 @@ function App() {
     }
 
     try {
-      setIsDownloading(true)
-      setDownloadMessage('Kaydediliyor...')
-      setShowPdfModal(false)
-
       const token = localStorage.getItem('cvToken')
       if (!token) {
         setShowLogin(true)
-        setIsDownloading(false)
+        setShowPdfModal(false)
         return
       }
 
-      // CV'yi kaydet
-      const response = await fetch(`${API_URL}/api/cv`, {
+      localStorage.setItem('cvDataForPayment', JSON.stringify(cvData))
+      const response = await fetch(`${API_URL}/api/paytr/init`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        credentials: 'include',
-        body: JSON.stringify({
-          title: cvData.name || 'CV',
-          data: cvData,
-        }),
+        body: JSON.stringify({ plan: 'save_download' }),
       })
-
+      const data = await response.json()
       if (!response.ok) {
-        throw new Error('CV kaydedilemedi')
+        alert(data.error || 'Ödeme başlatılamadı')
+        return
       }
-
-      // CV listesini yenile
-      await loadUserCvs()
-
-      // PDF'i indir
-      setDownloadMessage('İndiriliyor...')
-      const pdfResult = await exportToPdf()
-      setIsDownloading(false)
-      setDownloadMessage('')
-      if (!pdfResult) {
-        alert('PDF indirilemedi. Lütfen tekrar deneyin.')
-      }
+      localStorage.setItem('paytr_merchant_oid', data.merchant_oid)
+      localStorage.setItem('paytr_plan', 'save_download')
+      setShowPdfModal(false)
+      window.location.href = `https://www.paytr.com/odeme/guvenli/${data.token}`
     } catch (error) {
-      console.error('CV kaydetme hatası:', error)
-      setIsDownloading(false)
-      setDownloadMessage('')
-      alert('CV kaydedilemedi. Lütfen tekrar deneyin.')
+      console.error('PayTR başlatma hatası:', error)
+      alert('Ödeme sayfası açılamadı. Lütfen tekrar deneyin.')
     }
   }
 
   const handleDownloadOnly = async () => {
+    const email = (cvData.email || '').trim()
+    if (!email || !email.includes('@')) {
+      alert('Sadece indir (50 TL) için lütfen formda E-posta alanını doldurun.')
+      return
+    }
     try {
-      setIsDownloading(true)
-      setDownloadMessage('İndiriliyor...')
-      setShowPdfModal(false)
-      const pdfResult = await exportToPdf()
-      setIsDownloading(false)
-      setDownloadMessage('')
-      if (!pdfResult) {
-        alert('PDF indirilemedi. Lütfen tekrar deneyin.')
+      localStorage.setItem('cvDataForPayment', JSON.stringify(cvData))
+      const response = await fetch(`${API_URL}/api/paytr/init`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan: 'download_only',
+          email,
+          userName: cvData.name || 'Müşteri',
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        alert(data.error || 'Ödeme başlatılamadı')
+        return
       }
+      localStorage.setItem('paytr_merchant_oid', data.merchant_oid)
+      localStorage.setItem('paytr_plan', 'download_only')
+      setShowPdfModal(false)
+      window.location.href = `https://www.paytr.com/odeme/guvenli/${data.token}`
     } catch (error) {
-      console.error('PDF indirme hatası:', error)
-      setIsDownloading(false)
-      setDownloadMessage('')
-      alert('PDF indirilemedi. Lütfen tekrar deneyin.')
+      console.error('PayTR başlatma hatası:', error)
+      alert('Ödeme sayfası açılamadı. Lütfen tekrar deneyin.')
     }
   }
 
@@ -3170,11 +3141,11 @@ function PdfDownloadModal({ onClose, onSaveAndDownload, onDownloadOnly, isLogged
           <div className="pdf-modal__buttons">
             {isLoggedIn && (
               <button className="btn primary login-modal__button" onClick={onSaveAndDownload}>
-                💾 Kaydet ve İndir
+                💾 Kaydet ve İndir — <strong>100 TL</strong>
               </button>
             )}
             <button className="btn ghost login-modal__button" onClick={onDownloadOnly}>
-              📄 Sadece İndir
+              📄 Sadece İndir — <strong>50 TL</strong>
             </button>
           </div>
           {!isLoggedIn && (

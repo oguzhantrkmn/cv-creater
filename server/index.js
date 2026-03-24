@@ -1,6 +1,6 @@
 import express from 'express'
 import cors from 'cors'
-import Stripe from 'stripe'
+import crypto from 'crypto'
 import dotenv from 'dotenv'
 import mysql from 'mysql2/promise'
 import session from 'express-session'
@@ -27,43 +27,76 @@ if (process.env.OPENAI_API_KEY) {
 }
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret'
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
+// Google OAuth: callback tam olarak bu URL olmalı (Google Console'da birebir aynısı)
+const SERVER_URL = (process.env.SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '')
 
-// Stripe'ı başlat
-if (!process.env.STRIPE_SECRET_KEY) {
-  console.error('❌ HATA: STRIPE_SECRET_KEY bulunamadı!')
-  console.error('📝 Lütfen server/.env dosyasını oluşturun ve STRIPE_SECRET_KEY ekleyin.')
-  process.exit(1)
+// PayTR (https://dev.paytr.com)
+const PAYTR_MERCHANT_ID = (process.env.PAYTR_MERCHANT_ID || '').trim()
+const PAYTR_MERCHANT_KEY = (process.env.PAYTR_MERCHANT_KEY || '').trim()
+const PAYTR_MERCHANT_SALT = (process.env.PAYTR_MERCHANT_SALT || '').trim()
+const PAYTR_TEST_MODE =
+  process.env.PAYTR_TEST_MODE === '1' || process.env.PAYTR_TEST_MODE === 'true' ? '1' : '0'
+const paytrConfigured = !!(PAYTR_MERCHANT_ID && PAYTR_MERCHANT_KEY && PAYTR_MERCHANT_SALT)
+
+if (!paytrConfigured) {
+  console.warn('⚠️ PayTR yapılandırılmadı. PDF ücretli indirme çalışmayacak (PAYTR_MERCHANT_ID, PAYTR_MERCHANT_KEY, PAYTR_MERCHANT_SALT)')
+} else {
+  console.log(`✅ PayTR hazır (test_mode=${PAYTR_TEST_MODE})`)
 }
 
-// Stripe key formatını kontrol et
-const stripeKey = process.env.STRIPE_SECRET_KEY.trim()
-if (!stripeKey.startsWith('sk_test_') && !stripeKey.startsWith('sk_live_')) {
-  console.error('❌ HATA: Geçersiz Stripe Secret Key formatı!')
-  console.error('📝 Stripe Secret Key "sk_test_" veya "sk_live_" ile başlamalı.')
-  console.error(`📝 Mevcut key: ${stripeKey.substring(0, 10)}...`)
-  console.error('📝 Doğru key\'i almak için: https://dashboard.stripe.com/test/apikeys')
-  process.exit(1)
+function getClientIp(req) {
+  const xf = req.headers['x-forwarded-for']
+  if (typeof xf === 'string' && xf.length) {
+    return xf.split(',')[0].trim().replace('::ffff:', '').slice(0, 39)
+  }
+  const raw = req.socket?.remoteAddress || '127.0.0.1'
+  return String(raw).replace('::ffff:', '').slice(0, 39)
 }
 
-const stripe = new Stripe(stripeKey)
+// CORS — CLIENT_URL Render'da tam olarak tarayıcıdaki adresle aynı olmalı (https, www, netlify önizleme)
+function normalizeOrigin(url) {
+  if (!url) return ''
+  return String(url).trim().replace(/\/+$/, '')
+}
+const extraCors = (process.env.CORS_EXTRA_ORIGINS || '')
+  .split(',')
+  .map((s) => normalizeOrigin(s))
+  .filter(Boolean)
+const allowedOrigins = new Set(
+  [
+    normalizeOrigin(CLIENT_URL),
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://cv-creater.online',
+    'https://www.cv-creater.online',
+    'http://cv-creater.online',
+    'http://www.cv-creater.online',
+    ...extraCors,
+  ].filter(Boolean)
+)
 
-// CORS ayarları
-const allowedOrigins = [
-  CLIENT_URL,
-  'http://localhost:5173',
-  'https://cv-creater.online',
-  'https://www.cv-creater.online',
-].filter(Boolean)
+function isAllowedOrigin(origin) {
+  if (!origin) return true
+  const o = normalizeOrigin(origin)
+  if (allowedOrigins.has(o)) return true
+  // Netlify ana site ve önizleme adresleri (branch deploy)
+  if (/^https:\/\/[a-z0-9-]+\.netlify\.app$/i.test(o)) return true
+  if (/^https:\/\/[a-z0-9-]+--[a-z0-9-]+\.netlify\.app$/i.test(o)) return true
+  return false
+}
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true)
-    callback(new Error('CORS: İzin verilmeyen origin'))
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}))
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) return callback(null, true)
+      console.warn(`CORS reddedildi: "${origin}" — Render'da CLIENT_URL veya CORS_EXTRA_ORIGINS ile ekleyin`)
+      callback(null, false)
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+  })
+)
 app.use(express.json())
 
 // Session & Passport (Google OAuth için)
@@ -154,6 +187,17 @@ if (pool) {
         UNIQUE KEY unique_date (visited_at)
       )
     `)
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS paytr_orders (
+        merchant_oid VARCHAR(64) PRIMARY KEY,
+        plan_type VARCHAR(32) NOT NULL,
+        user_id INT NULL,
+        amount_kurus INT NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
     console.log('✅ Veritabanı tabloları hazır')
   } catch (error) {
     console.error('❌ Tablo oluşturma hatası:', error.message)
@@ -189,7 +233,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       {
         clientID: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: `${process.env.SERVER_URL || 'http://localhost:3001'}/auth/google/callback`,
+        callbackURL: `${SERVER_URL}/auth/google/callback`,
       },
       async (accessToken, refreshToken, profile, done) => {
         try {
@@ -234,6 +278,8 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       done(err)
     }
   })
+  console.log('🔐 Google OAuth callback URL (Google Cloud Console → Authorized redirect URIs):')
+  console.log(`   ${SERVER_URL}/auth/google/callback`)
 }
 
 const signToken = (user) =>
@@ -395,74 +441,182 @@ app.get('/api/admin/stats', authMiddleware, async (req, res) => {
   }
 })
 
-// Ödeme oturumu oluştur
-app.post('/api/create-checkout-session', async (req, res) => {
+// PayTR: ödeme başlat (iFrame token)
+app.post('/api/paytr/init', async (req, res) => {
   try {
-    const { cvName } = req.body
-
-    // Stripe key kontrolü
-    if (!stripeKey.startsWith('sk_test_') && !stripeKey.startsWith('sk_live_')) {
-      return res.status(400).json({ 
-        error: 'Geçersiz Stripe API Key. Key "sk_test_" veya "sk_live_" ile başlamalı.',
-        hint: 'Stripe Dashboard\'dan doğru key\'i alın: https://dashboard.stripe.com/test/apikeys'
-      })
+    if (!paytrConfigured) {
+      return res.status(503).json({ error: 'Ödeme sistemi yapılandırılmamış. PAYTR_MERCHANT_ID, KEY ve SALT ekleyin.' })
+    }
+    if (!pool) {
+      return res.status(503).json({ error: 'Veritabanı bağlantısı gerekli.' })
     }
 
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price_data: {
-            currency: 'try',
-            product_data: {
-              name: 'CV PDF İndirme',
-              description: `${cvName || 'CV'} PDF dosyasını indir`,
-            },
-            unit_amount: 5000, // 50 TL = 5000 kuruş
-          },
-          quantity: 1,
-        },
-      ],
-      mode: 'payment',
-      success_url: `${CLIENT_URL}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${CLIENT_URL}?payment=cancel`,
-      metadata: {
-        cvName: cvName || 'CV',
-      },
+    const { plan, email: bodyEmail, userName } = req.body
+    if (!['save_download', 'download_only'].includes(plan)) {
+      return res.status(400).json({ error: 'Geçersiz plan' })
+    }
+
+    let userId = null
+    let email = typeof bodyEmail === 'string' ? bodyEmail.trim() : ''
+    let name = typeof userName === 'string' ? userName.trim() : 'Müşteri'
+
+    if (plan === 'save_download') {
+      const authHeader = req.headers.authorization || ''
+      const tok = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+      if (!tok) return res.status(401).json({ error: 'Kaydet ve indir için giriş gerekli' })
+      try {
+        const payload = jwt.verify(tok, JWT_SECRET)
+        userId = payload.id
+        if (payload.email) email = String(payload.email).trim()
+        if (payload.name) name = String(payload.name).trim().slice(0, 60)
+      } catch {
+        return res.status(401).json({ error: 'Oturum geçersiz' })
+      }
+    } else {
+      if (!email || !email.includes('@')) {
+        return res.status(400).json({ error: 'Sadece indir için geçerli bir e-posta gerekli (formdaki E-posta alanı).' })
+      }
+    }
+
+    if (!email || email.length > 100) {
+      return res.status(400).json({ error: 'Geçerli e-posta gerekli' })
+    }
+
+    const amount = plan === 'save_download' ? 10000 : 5000
+    const basket =
+      plan === 'save_download'
+        ? [['CV Kaydet ve PDF İndir', '100.00', 1]]
+        : [['CV PDF İndir', '50.00', 1]]
+    const user_basket = Buffer.from(JSON.stringify(basket), 'utf8').toString('base64')
+
+    const merchant_oid = `CV${Date.now()}${crypto.randomBytes(4).toString('hex')}`.slice(0, 64)
+    const user_ip = getClientIp(req)
+    const payment_amount = String(amount)
+    const no_installment = '1'
+    const max_installment = '0'
+    const currency = 'TL'
+
+    const hashStr =
+      PAYTR_MERCHANT_ID +
+      user_ip +
+      merchant_oid +
+      email +
+      payment_amount +
+      user_basket +
+      no_installment +
+      max_installment +
+      currency +
+      PAYTR_TEST_MODE
+    const paytr_token = crypto
+      .createHmac('sha256', PAYTR_MERCHANT_KEY)
+      .update(hashStr + PAYTR_MERCHANT_SALT)
+      .digest('base64')
+
+    const merchant_ok_url = `${CLIENT_URL.replace(/\/+$/, '')}?payment=paytr_ok`
+    const merchant_fail_url = `${CLIENT_URL.replace(/\/+$/, '')}?payment=paytr_fail`
+
+    const params = new URLSearchParams({
+      merchant_id: PAYTR_MERCHANT_ID,
+      user_ip,
+      merchant_oid,
+      email,
+      payment_amount,
+      paytr_token,
+      user_basket,
+      debug_on: '1',
+      no_installment,
+      max_installment,
+      user_name: name.slice(0, 60),
+      user_address: 'Türkiye',
+      user_phone: '05000000000',
+      merchant_ok_url,
+      merchant_fail_url,
+      timeout_limit: '30',
+      currency,
+      test_mode: PAYTR_TEST_MODE,
     })
 
-    res.json({ sessionId: session.id, url: session.url })
+    const payRes = await fetch('https://www.paytr.com/odeme/api/get-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    })
+    const result = await payRes.json()
+    if (result.status !== 'success') {
+      console.error('PayTR get-token:', result)
+      return res.status(400).json({ error: result.reason || 'PayTR token alınamadı' })
+    }
+
+    await pool.query(
+      `INSERT INTO paytr_orders (merchant_oid, plan_type, user_id, amount_kurus, status) VALUES (?, ?, ?, ?, 'pending')`,
+      [merchant_oid, plan, userId, amount]
+    )
+
+    res.json({ token: result.token, merchant_oid })
   } catch (error) {
-    console.error('Stripe error:', error)
-    
-    // Daha açıklayıcı hata mesajları
-    let errorMessage = error.message
-    if (error.type === 'StripeAuthenticationError') {
-      errorMessage = 'Stripe API Key geçersiz. Lütfen server/.env dosyasındaki STRIPE_SECRET_KEY\'i kontrol edin.'
-    } else if (error.type === 'StripeInvalidRequestError') {
-      errorMessage = 'Stripe isteği geçersiz: ' + error.message
-    }
-    
-    res.status(500).json({ 
-      error: errorMessage,
-      type: error.type || 'UnknownError'
-    })
+    console.error('PayTR init error:', error)
+    res.status(500).json({ error: error.message })
   }
 })
 
-// Ödeme durumunu kontrol et
-app.get('/api/check-payment/:sessionId', async (req, res) => {
-  try {
-    const { sessionId } = req.params
-    const session = await stripe.checkout.sessions.retrieve(sessionId)
+// PayTR bildirim URL (mağaza panelinde tanımlanmalı: https://SUNUCU/api/paytr/callback)
+app.post('/api/paytr/callback', express.urlencoded({ extended: false, limit: '64kb' }), async (req, res) => {
+  if (!paytrConfigured || !pool) {
+    return res.status(200).send('OK')
+  }
+  const post = req.body
+  const merchant_oid = post.merchant_oid
+  const status = post.status
+  const total_amount = post.total_amount
+  const hash = post.hash
 
+  if (!merchant_oid || !status || !hash || total_amount === undefined) {
+    console.error('PayTR callback: eksik alan', Object.keys(post))
+    return res.status(200).send('OK')
+  }
+
+  const calcHash = crypto
+    .createHmac('sha256', PAYTR_MERCHANT_KEY)
+    .update(merchant_oid + PAYTR_MERCHANT_SALT + status + total_amount)
+    .digest('base64')
+
+  if (calcHash !== hash) {
+    console.error('PayTR callback: hash uyuşmazlığı')
+    return res.status(200).send('HASH_FAIL')
+  }
+
+  try {
+    if (status === 'success') {
+      await pool.query(
+        `UPDATE paytr_orders SET status = 'paid' WHERE merchant_oid = ? AND status = 'pending'`,
+        [merchant_oid]
+      )
+    } else if (status === 'failed') {
+      await pool.query(`UPDATE paytr_orders SET status = 'failed' WHERE merchant_oid = ?`, [merchant_oid])
+    }
+  } catch (e) {
+    console.error('PayTR callback DB:', e)
+  }
+  res.send('OK')
+})
+
+// PayTR ödeme doğrulama (istemci yönlendirme sonrası polling)
+app.get('/api/paytr/verify/:merchantOid', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ paid: false, error: 'Veritabanı yok' })
+    const { merchantOid } = req.params
+    const [rows] = await pool.query('SELECT plan_type, status FROM paytr_orders WHERE merchant_oid = ?', [
+      merchantOid,
+    ])
+    if (!rows.length) return res.json({ paid: false })
+    const row = rows[0]
     res.json({
-      paid: session.payment_status === 'paid',
-      status: session.payment_status,
+      paid: row.status === 'paid',
+      plan: row.plan_type,
     })
   } catch (error) {
-    console.error('Payment check error:', error)
-    res.status(500).json({ error: error.message })
+    console.error('PayTR verify error:', error)
+    res.status(500).json({ paid: false, error: error.message })
   }
 })
 
@@ -675,6 +829,8 @@ app.post('/api/ai/suggest-skills', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`)
-  console.log(`💳 Stripe mode: ${process.env.STRIPE_SECRET_KEY?.startsWith('sk_test') ? 'TEST' : 'LIVE'}`)
+  if (paytrConfigured) {
+    console.log(`🔗 PayTR bildirim URL (panelde kaydedin): ${SERVER_URL}/api/paytr/callback`)
+  }
 })
 
