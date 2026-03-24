@@ -195,9 +195,17 @@ if (pool) {
         user_id INT NULL,
         amount_kurus INT NOT NULL,
         status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        unlock_template_id VARCHAR(32) NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `)
+    try {
+      await pool.query('ALTER TABLE paytr_orders ADD COLUMN unlock_template_id VARCHAR(32) NULL')
+    } catch (alterErr) {
+      if (alterErr.code !== 'ER_DUP_FIELDNAME') {
+        console.warn('paytr_orders unlock_template_id migration:', alterErr.message)
+      }
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS paytr_callback_logs (
@@ -480,6 +488,33 @@ app.get('/api/admin/paytr-logs', authMiddleware, async (req, res) => {
   }
 })
 
+/** PDF fiyatına eklenecek şablon ek ücreti (kuruş); tüm şablonlar 50 TL */
+const PAYTR_TEMPLATE_SURCHARGE_KURUS = {
+  classic: 5000,
+  minimal: 5000,
+  modern: 5000,
+  creative: 5000,
+  compact: 5000,
+}
+const PAYTR_TEMPLATE_LABEL = {
+  classic: 'Klasik',
+  minimal: 'Minimal',
+  modern: 'Modern',
+  creative: 'Yaratıcı',
+  compact: 'Kompakt',
+}
+const PAYTR_ALLOWED_TEMPLATE_IDS = new Set(['classic', 'minimal', 'modern', 'creative', 'compact'])
+
+function normalizePaytrTemplateId(raw) {
+  const tid = typeof raw === 'string' ? raw.trim() : ''
+  if (PAYTR_ALLOWED_TEMPLATE_IDS.has(tid)) return tid
+  return 'classic'
+}
+
+function templateSurchargeKurus(templateId) {
+  return PAYTR_TEMPLATE_SURCHARGE_KURUS[templateId] ?? 5000
+}
+
 // PayTR: ödeme başlat (iFrame token)
 app.post('/api/paytr/init', async (req, res) => {
   try {
@@ -490,14 +525,15 @@ app.post('/api/paytr/init', async (req, res) => {
       return res.status(503).json({ error: 'Veritabanı bağlantısı gerekli.' })
     }
 
-    const { plan, email: bodyEmail, userName } = req.body
-    if (!['save_download', 'download_only'].includes(plan)) {
+    const { plan, email: bodyEmail, userName, templateId: bodyTemplateId } = req.body
+    if (!['save_download', 'download_only', 'template_unlock'].includes(plan)) {
       return res.status(400).json({ error: 'Geçersiz plan' })
     }
 
     let userId = null
     let email = typeof bodyEmail === 'string' ? bodyEmail.trim() : ''
     let name = typeof userName === 'string' ? userName.trim() : 'Müşteri'
+    let orderTemplateId = null
 
     if (plan === 'save_download') {
       const authHeader = req.headers.authorization || ''
@@ -511,21 +547,51 @@ app.post('/api/paytr/init', async (req, res) => {
       } catch {
         return res.status(401).json({ error: 'Oturum geçersiz' })
       }
-    } else {
+      orderTemplateId = normalizePaytrTemplateId(bodyTemplateId)
+    } else if (plan === 'download_only') {
       if (!email || !email.includes('@')) {
         return res.status(400).json({ error: 'Sadece indir için geçerli bir e-posta gerekli (formdaki E-posta alanı).' })
       }
+      orderTemplateId = normalizePaytrTemplateId(bodyTemplateId)
+    } else if (plan === 'template_unlock') {
+      const tid = typeof bodyTemplateId === 'string' ? bodyTemplateId.trim() : ''
+      if (!PAYTR_ALLOWED_TEMPLATE_IDS.has(tid)) {
+        return res.status(400).json({ error: 'Geçersiz şablon' })
+      }
+      if (!email || !email.includes('@')) {
+        return res.status(400).json({ error: 'Premium şablon için geçerli bir e-posta gerekli (formdaki E-posta alanı).' })
+      }
+      orderTemplateId = tid
     }
 
     if (!email || email.length > 100) {
       return res.status(400).json({ error: 'Geçerli e-posta gerekli' })
     }
 
-    const amount = plan === 'save_download' ? 10000 : 5000
-    const basket =
-      plan === 'save_download'
-        ? [['CV Kaydet ve PDF İndir', '100.00', 1]]
-        : [['CV PDF İndir', '50.00', 1]]
+    let amount
+    let basket
+    if (plan === 'save_download') {
+      const extra = templateSurchargeKurus(orderTemplateId)
+      amount = 10000 + extra
+      basket = [['CV Kaydet ve PDF İndir', '100.00', 1]]
+      {
+        const lab = PAYTR_TEMPLATE_LABEL[orderTemplateId] || orderTemplateId
+        basket.push([`Şablon: ${lab}`, (extra / 100).toFixed(2), 1])
+      }
+    } else if (plan === 'download_only') {
+      const extra = templateSurchargeKurus(orderTemplateId)
+      amount = 5000 + extra
+      basket = [['CV PDF İndir', '50.00', 1]]
+      {
+        const lab = PAYTR_TEMPLATE_LABEL[orderTemplateId] || orderTemplateId
+        basket.push([`Şablon: ${lab}`, (extra / 100).toFixed(2), 1])
+      }
+    } else {
+      amount = templateSurchargeKurus(orderTemplateId)
+      const label = PAYTR_TEMPLATE_LABEL[orderTemplateId] || orderTemplateId
+      const tl = (amount / 100).toFixed(2)
+      basket = [[`CV Şablon: ${label}`, tl, 1]]
+    }
     const user_basket = Buffer.from(JSON.stringify(basket), 'utf8').toString('base64')
 
     const merchant_oid = `CV${Date.now()}${crypto.randomBytes(4).toString('hex')}`.slice(0, 64)
@@ -587,8 +653,8 @@ app.post('/api/paytr/init', async (req, res) => {
     }
 
     await pool.query(
-      `INSERT INTO paytr_orders (merchant_oid, plan_type, user_id, amount_kurus, status) VALUES (?, ?, ?, ?, 'pending')`,
-      [merchant_oid, plan, userId, amount]
+      `INSERT INTO paytr_orders (merchant_oid, plan_type, user_id, amount_kurus, status, unlock_template_id) VALUES (?, ?, ?, ?, 'pending', ?)`,
+      [merchant_oid, plan, userId, amount, orderTemplateId]
     )
 
     res.json({ token: result.token, merchant_oid })
@@ -674,14 +740,16 @@ app.get('/api/paytr/verify/:merchantOid', async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ paid: false, error: 'Veritabanı yok' })
     const { merchantOid } = req.params
-    const [rows] = await pool.query('SELECT plan_type, status FROM paytr_orders WHERE merchant_oid = ?', [
-      merchantOid,
-    ])
+    const [rows] = await pool.query(
+      'SELECT plan_type, status, unlock_template_id FROM paytr_orders WHERE merchant_oid = ?',
+      [merchantOid]
+    )
     if (!rows.length) return res.json({ paid: false })
     const row = rows[0]
     res.json({
       paid: row.status === 'paid',
       plan: row.plan_type,
+      unlockTemplateId: row.unlock_template_id || null,
     })
   } catch (error) {
     console.error('PayTR verify error:', error)

@@ -11,6 +11,15 @@ const API_URL = import.meta.env.VITE_API_URL ||
     ? 'https://your-backend-url.herokuapp.com' // Backend URL'inizi buraya yazın
     : 'http://localhost:3001')
 
+/** Şablon PDF ek ücreti (TL); tüm şablonlar aynı — sunucu kuruş ile senkron */
+const CV_TEMPLATE_CATALOG = [
+  { id: 'classic', label: 'Klasik', icon: '📋', priceTry: 50 },
+  { id: 'modern', label: 'Modern', icon: '🗂️', priceTry: 50 },
+  { id: 'minimal', label: 'Minimal', icon: '🤍', priceTry: 50 },
+  { id: 'creative', label: 'Yaratıcı', icon: '🎨', priceTry: 50 },
+  { id: 'compact', label: 'Kompakt', icon: '⚡', priceTry: 50 },
+]
+
 // Türkiye illeri ve ilçeleri - JSON dosyasından yükleniyor
 const turkeyLocations = turkeyLocationsData
 
@@ -123,10 +132,35 @@ const defaultData = {
   references: [],
 }
 
-// Örnek CV'ler
+function cvLanguageLevelDots(level) {
+  const l = (level || '').toLocaleLowerCase('tr-TR')
+  if (l.includes('ana dil')) return 5
+  if (l.includes('ileri')) return 5
+  if (l.includes('orta')) return 3
+  if (l.includes('başlang')) return 2
+  return 4
+}
+
+function CvSkillDots({ filled }) {
+  const n = Math.max(0, Math.min(5, filled))
+  return (
+    <span className="cv-skill-dots" aria-hidden>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <span
+          key={i}
+          className={i <= n ? 'cv-skill-dots__dot cv-skill-dots__dot--on' : 'cv-skill-dots__dot'}
+        />
+      ))}
+    </span>
+  )
+}
+
+// Örnek CV'ler — her biri bir şablonla eşleşir; giriş gerektirmeden önizlenebilir
 const exampleCVs = [
   {
     id: 1,
+    template: 'classic',
+    templateLabel: 'Klasik',
     title: 'Yazılımcı',
     icon: '💻',
     color: '#FF6D1F',
@@ -172,11 +206,13 @@ const exampleCVs = [
   },
   {
     id: 2,
+    template: 'modern',
+    templateLabel: 'Modern',
     title: 'Tasarımcı',
-    icon: '🎨',
-    color: '#FF6D1F',
+    icon: '🗂️',
+    color: '#7c3aed',
     data: {
-      accent: '#FF6D1F',
+      accent: '#7c3aed',
       avatar: '/avatars/avatar-designer.svg',
       avatarShape: 'circle',
       name: 'Elif Kaya',
@@ -216,11 +252,111 @@ const exampleCVs = [
   },
   {
     id: 3,
+    template: 'minimal',
+    templateLabel: 'Minimal',
+    title: 'Finans',
+    icon: '📊',
+    color: '#0f766e',
+    data: {
+      accent: '#0f766e',
+      avatar: '/avatars/avatar-marketer.svg',
+      avatarShape: 'rounded',
+      name: 'Zeynep Aydın',
+      title: 'Finansal Kontrolör',
+      city: 'İstanbul',
+      district: 'Beşiktaş',
+      phone: '0 532 000 11 22',
+      email: 'zeynep.aydin@email.com',
+      birthDay: '04',
+      birthMonth: 'Mayıs',
+      birthYear: '1993',
+      objective:
+        'Big Four ve FMCG sektöründe finansal raporlama, bütçe ve iç kontrol süreçlerinde 6+ yıl deneyim. SAP FI ve Excel Power Query ile rapor otomasyonu konusunda güçlüyüm.',
+      education: [
+        {
+          id: 1,
+          school: 'Boğaziçi Üniversitesi — İşletme (Finans)',
+          city: 'İstanbul',
+          district: 'Bebek',
+          startDate: '2011',
+          endDate: '2015',
+          ongoing: false,
+          note: 'Üst %10 derece',
+        },
+      ],
+      experience: [
+        {
+          id: 1,
+          company: 'Finansal Kontrolör — Çok Uluslu Tüketim Şirketi',
+          city: 'İstanbul',
+          district: 'Şişli',
+          startDate: 'Şubat 2021',
+          endDate: '',
+          ongoing: true,
+          details: [
+            'Yıllık bütçe ve tahmin süreçlerinde bölge finans ekibine liderlik',
+            'TFRS uyumlu konsolidasyon raporları ve yönetim sunumları',
+            'Maliyet merkezi analizi ile operasyonel verimlilik projeleri',
+          ],
+        },
+        {
+          id: 2,
+          company: 'Finans Uzmanı — Denetim & Danışmanlık',
+          city: 'İstanbul',
+          district: 'Levent',
+          startDate: 'Eylül 2017',
+          endDate: 'Ocak 2021',
+          ongoing: false,
+          details: [
+            'Halka açık şirket ve holding denetimlerinde saha finans testleri',
+            'İç kontrol günlükleri ve düzeltici aksiyon takibi',
+          ],
+        },
+      ],
+      projects: [
+        {
+          id: 1,
+          name: 'SAP FI Modülü Raporlama Standardizasyonu',
+          startDate: '2022',
+          endDate: '2023',
+          ongoing: false,
+          details: ['Tek tip hesap planı ve otomatik mutabakat şablonları'],
+        },
+      ],
+      activities: [
+        {
+          id: 1,
+          name: 'Gönüllü Mentor — Genç Finans Platformu',
+          city: 'İstanbul',
+          district: 'Online',
+          startDate: '2020',
+          endDate: '',
+          ongoing: true,
+          details: ['Üniversite öğrencilerine kariyer ve mülakat desteği'],
+        },
+      ],
+      certificates: [
+        { id: 1, name: 'CFA Level II (Aday)', org: 'CFA Institute', date: '2024' },
+        { id: 2, name: 'FMVA — Financial Modeling', org: 'Corporate Finance Institute', date: '2022' },
+      ],
+      skills: ['SAP FI', 'Excel (İleri)', 'Power BI', 'IFRS', 'Bütçe & Forecast', 'SQL (temel)'],
+      languages: [
+        { lang: 'İngilizce', level: 'İleri' },
+        { lang: 'Fransızca', level: 'Orta' },
+      ],
+      competencies: ['Analitik düşünme', 'Etik ve gizlilik', 'Detay odaklılık', 'Sunum'],
+      interests: ['Ekonomi podcastleri', 'Doğa yürüyüşü', 'Klasik piyano'],
+    },
+  },
+  {
+    id: 4,
+    template: 'creative',
+    templateLabel: 'Yaratıcı',
     title: 'Pazarlamacı',
     icon: '📈',
-    color: '#FF6D1F',
+    color: '#e11d48',
     data: {
-      accent: '#FF6D1F',
+      accent: '#e11d48',
       avatar: '/avatars/avatar-marketer.svg',
       avatarShape: 'rounded',
       name: 'Mehmet Demir',
@@ -259,7 +395,116 @@ const exampleCVs = [
       competencies: ['Stratejik Planlama', 'Veri Analizi', 'Liderlik', 'İkna'],
       interests: ['Girişimcilik', 'Podcast', 'Yatırım', 'Koşu']
     }
-  }
+  },
+  {
+    id: 5,
+    template: 'compact',
+    templateLabel: 'Kompakt',
+    title: 'Satış',
+    icon: '⚡',
+    color: '#c2410c',
+    data: {
+      accent: '#c2410c',
+      avatar: '/avatars/avatar-dev.svg',
+      avatarShape: 'square',
+      name: 'Burak Şen',
+      title: 'Kıdemli Satış Müdürü — B2B SaaS',
+      city: 'İzmir',
+      district: 'Bayraklı',
+      phone: '0 505 444 99 00',
+      email: 'burak.sen@email.com',
+      birthDay: '18',
+      birthMonth: 'Eylül',
+      birthYear: '1988',
+      websiteUrl: 'https://linkedin.com/in/ornek',
+      objective:
+        '12 yıldır kurumsal satış ve hesap büyütme alanında; pipeline yönetimi, müzakere ve çapraz satış ile yinelenir geliri büyüten sonuç odaklı satış lideri.',
+      education: [
+        {
+          id: 1,
+          school: 'Ege Üniversitesi — İktisat',
+          city: 'İzmir',
+          district: 'Bornova',
+          startDate: '2006',
+          endDate: '2010',
+          ongoing: false,
+          note: '',
+        },
+      ],
+      experience: [
+        {
+          id: 1,
+          company: 'SaaSCo — Satış Müdürü',
+          city: 'İzmir',
+          district: 'Bayraklı',
+          startDate: '2020',
+          endDate: '',
+          ongoing: true,
+          details: [
+            'Bölge ARR hedeflerini 3 yıl üst üste aştım',
+            'Kurumsal pipeline için MEDDPICC metodolojisi',
+            'SDR & AE ekibi koçluğu ve komisyon planları',
+          ],
+        },
+        {
+          id: 2,
+          company: 'Teknoloji A.Ş. — Senior Account Executive',
+          city: 'İstanbul',
+          district: 'Maslak',
+          startDate: '2016',
+          endDate: '2019',
+          ongoing: false,
+          details: [
+            'Enterprise müşteri portföyünde %40 net büyüme',
+            'Çözüm mimarları ile ortak demolar ve PoC',
+          ],
+        },
+        {
+          id: 3,
+          company: 'Yazılım Bayii — Satış Temsilcisi',
+          city: 'Ankara',
+          district: 'Çankaya',
+          startDate: '2012',
+          endDate: '2016',
+          ongoing: false,
+          details: ['Kanal satışı ve bayi eğitimleri', 'Teklif ve sözleşme takibi'],
+        },
+      ],
+      projects: [
+        {
+          id: 1,
+          name: 'Yeni Sektör Dikeyi — Fintech',
+          startDate: '2023',
+          endDate: '2024',
+          ongoing: false,
+          details: ['İlk 12 ayda 2,8M TL sözleşme kapaması'],
+        },
+      ],
+      activities: [
+        {
+          id: 1,
+          name: 'Panel — Satış Zirvesi İzmir',
+          city: 'İzmir',
+          district: 'Konak',
+          startDate: '2024',
+          endDate: '',
+          ongoing: true,
+          details: ['B2B satış hunisi optimizasyonu konuşmacısı'],
+        },
+      ],
+      certificates: [
+        { id: 1, name: 'Strategic Selling', org: 'Miller Heiman', date: '2021' },
+        { id: 2, name: 'HubSpot Sales Software', org: 'HubSpot', date: '2020' },
+      ],
+      skills: ['Salesforce', 'HubSpot', 'MEDDIC', 'Zoho CRM', 'Excel', 'Sunum', 'İngilizce müzakere'],
+      languages: [
+        { lang: 'İngilizce', level: 'İleri' },
+        { lang: 'Almanca', level: 'Orta' },
+      ],
+      competencies: ['İkna', 'Zaman yönetimi', 'Dinleme', 'Rakip analizi'],
+      interests: ['Tenis', 'Deniz kürek', 'İş kitapları'],
+    },
+  },
 ]
 
 function App() {
@@ -317,6 +562,17 @@ function App() {
     () => `${cvData.name?.toLowerCase().replace(/\s+/g, '-') || 'cv'}.pdf`,
     [cvData.name]
   )
+
+  const pdfPricing = useMemo(() => {
+    const def = CV_TEMPLATE_CATALOG.find((t) => t.id === template) || CV_TEMPLATE_CATALOG[0]
+    const extra = def.priceTry
+    return {
+      templateLabel: def.label,
+      templateExtraTry: extra,
+      saveTotalTry: 100 + extra,
+      downloadTotalTry: 50 + extra,
+    }
+  }, [template])
 
   // ATS Uyum Skoru
   const showToast = useCallback((message, type = 'error') => {
@@ -775,12 +1031,14 @@ function App() {
 
         let paid = false
         let plan = planHint || localStorage.getItem('paytr_plan') || 'download_only'
+        let unlockTemplateId = null
         for (let i = 0; i < 30; i++) {
           const response = await fetch(`${API_URL}/api/paytr/verify/${encodeURIComponent(merchantOid)}`)
           const data = await response.json()
           if (data.paid) {
             paid = true
             plan = data.plan || plan
+            unlockTemplateId = data.unlockTemplateId || null
             break
           }
           await new Promise((resolve) => setTimeout(resolve, 1000))
@@ -791,6 +1049,27 @@ function App() {
             'Ödeme onayı sunucudan henüz gelmedi. PayTR bildirim URL ayarını kontrol edin veya bir dakika sonra sayfayı yenileyin.'
           )
           return
+        }
+
+        if (plan === 'template_unlock') {
+          localStorage.removeItem('paytr_merchant_oid')
+          localStorage.removeItem('paytr_plan')
+          localStorage.removeItem('paytr_unlock_template')
+          localStorage.removeItem('cvDataForPayment')
+          showToast(
+            'Eski şablon ödemesi algılandı. PDF indirirken güncel fiyat uygulanır. PDF İndir ile devam edin.',
+            'warning'
+          )
+          return
+        }
+
+        const restoreTemplateId =
+          unlockTemplateId || localStorage.getItem('paytr_download_template')
+        if (
+          restoreTemplateId &&
+          CV_TEMPLATE_CATALOG.some((t) => t.id === restoreTemplateId)
+        ) {
+          setTemplate(restoreTemplateId)
         }
 
         showToast('Odemeniz alindi. PDF hazirlaniyor...', 'info')
@@ -837,6 +1116,7 @@ function App() {
             setHasPaid(false)
             localStorage.removeItem('paytr_merchant_oid')
             localStorage.removeItem('paytr_plan')
+            localStorage.removeItem('paytr_download_template')
             localStorage.removeItem('paidTimestamp')
             localStorage.removeItem('cvDataForPayment')
           } else {
@@ -847,6 +1127,7 @@ function App() {
         console.error('PayTR success handler:', error)
         showToast('Ödeme doğrulanamadı.')
         localStorage.removeItem('cvDataForPayment')
+        localStorage.removeItem('paytr_download_template')
       }
     },
     [exportToPdf, showToast]
@@ -884,6 +1165,8 @@ function App() {
       localStorage.removeItem('cvDataForPayment')
       localStorage.removeItem('paytr_merchant_oid')
       localStorage.removeItem('paytr_plan')
+      localStorage.removeItem('paytr_unlock_template')
+      localStorage.removeItem('paytr_download_template')
       window.history.replaceState({}, document.title, window.location.pathname)
     }
   }, [handlePaytrSuccess, exportToPdf, showToast])
@@ -909,13 +1192,14 @@ function App() {
       }
 
       localStorage.setItem('cvDataForPayment', JSON.stringify(cvData))
+      localStorage.setItem('paytr_download_template', template)
       const response = await fetch(`${API_URL}/api/paytr/init`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ plan: 'save_download' }),
+        body: JSON.stringify({ plan: 'save_download', templateId: template }),
       })
       const data = await response.json()
       if (!response.ok) {
@@ -935,16 +1219,18 @@ function App() {
   const handleDownloadOnly = async () => {
     const email = (cvData.email || '').trim()
     if (!email || !email.includes('@')) {
-      alert('Sadece indir (50 TL) için lütfen formda E-posta alanını doldurun.')
+      alert('Sadece İndir için lütfen formda E-posta alanını doldurun.')
       return
     }
     try {
       localStorage.setItem('cvDataForPayment', JSON.stringify(cvData))
+      localStorage.setItem('paytr_download_template', template)
       const response = await fetch(`${API_URL}/api/paytr/init`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           plan: 'download_only',
+          templateId: template,
           email,
           userName: cvData.name || 'Müşteri',
         }),
@@ -1328,273 +1614,368 @@ function App() {
     }
   }
 
-  const renderCv = (innerRef = null) => {
-    if (template === 'modern') return renderModernCv(innerRef)
-    if (template === 'creative') return renderCreativeCv(innerRef)
-    if (template === 'compact') return renderCompactCv(innerRef)
+  const renderClassicCv = (innerRef = null) => {
+    const accent = cvData.accent || '#00a8eaff'
     return (
-      <div className={`cv-page${template === 'minimal' ? ' cv-page--minimal' : ''}`} ref={innerRef}>
-        <div className="cv__header" style={{ borderColor: template === 'minimal' ? '#ccc' : cvData.accent }}>
-          {cvData.avatar && (
-            <div className={`avatar ${getAvatarClass()}`} style={{ borderColor: template === 'minimal' ? '#ccc' : cvData.accent }}>
-              <img src={cvData.avatar} alt={`${cvData.name || 'Aday'} avatar`} width="120" height="120" style={{ display: 'block' }} />
-            </div>
-          )}
-          <div style={{ flex: 1 }}>
-            <h1>{cvData.name || 'Ad Soyad'}</h1>
-            <p className="cv__title">{cvData.title || 'Hedef Pozisyon / Ünvan'}</p>
-            <div className="meta">
-              {(cvData.city || cvData.district) && <span>📍 {formatLocation(cvData.city, cvData.district)}</span>}
-              {cvData.phone && <span>📞 {cvData.phone}</span>}
-              {cvData.email && <span>✉️ {cvData.email}</span>}
-              {formatBirthDate() && <span>🎂 {formatBirthDate()}</span>}
-              {cvData.websiteUrl && <span>🔗 {cvData.websiteUrl}</span>}
+      <div
+        className="cv-page cv-page--blueprint"
+        ref={innerRef}
+        style={{ '--bp-accent': accent }}
+      >
+        <header className="cv-blueprint__header">
+          <div className="cv-blueprint__header-art">
+            {cvData.avatar ? (
+              <div className={`avatar cv-blueprint__avatar ${getAvatarClass()}`}>
+                <img src={cvData.avatar} alt="" width="96" height="96" style={{ display: 'block' }} />
+              </div>
+            ) : (
+              <div className="cv-blueprint__avatar cv-blueprint__avatar--placeholder" aria-hidden />
+            )}
+            <div className="cv-blueprint__squares" aria-hidden>
+              <span /><span /><span /><span />
             </div>
           </div>
-          {qrDataUrl && (
-            <div className="cv__qr">
-              <img src={qrDataUrl} alt="QR Kod" width="72" height="72" />
+          <div className="cv-blueprint__header-copy">
+            <h1 className="cv-blueprint__name">{cvData.name || 'Ad Soyad'}</h1>
+            <p className="cv-blueprint__tagline">{cvData.title || 'Uzmanlık / Ünvan'}</p>
+            <div className="cv-blueprint__rule" />
+            <div className="cv-blueprint__contact-row">
+              {cvData.phone && <span>📞 {cvData.phone}</span>}
+              {cvData.email && <span>✉️ {cvData.email}</span>}
+              {(cvData.city || cvData.district) && <span>📍 {formatLocation(cvData.city, cvData.district)}</span>}
             </div>
-          )}
-        </div>
+            <div className="cv-blueprint__bar" />
+          </div>
+        </header>
 
-        {cvData.objective && (
-          <Section title="Özet" accent={template === 'minimal' ? '#555' : cvData.accent}>
-            <p className="muted">{cvData.objective}</p>
-          </Section>
-        )}
-
-        {cvData.education.length > 0 && (
-          <Section title="Eğitim" accent={template === 'minimal' ? '#555' : cvData.accent}>
-            {cvData.education.map((item) => (
-              <Item key={item.id} title={item.school} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
-                {item.note && <p className="muted">{item.note}</p>}
-              </Item>
-            ))}
-          </Section>
-        )}
-
-        {cvData.experience.length > 0 && (
-          <Section title="İş Deneyimi" accent={template === 'minimal' ? '#555' : cvData.accent}>
-            {cvData.experience.map((item) => (
-              <Item key={item.id} title={item.company} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
-                {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
-              </Item>
-            ))}
-          </Section>
-        )}
-
-        {cvData.projects.length > 0 && (
-          <Section title="Projeler" accent={template === 'minimal' ? '#555' : cvData.accent}>
-            {cvData.projects.map((item) => (
-              <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)}>
-                {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
-              </Item>
-            ))}
-          </Section>
-        )}
-
-        {cvData.activities.length > 0 && (
-          <Section title="Aktiviteler" accent={template === 'minimal' ? '#555' : cvData.accent}>
-            {cvData.activities.map((item) => (
-              <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
-                {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
-              </Item>
-            ))}
-          </Section>
-        )}
-
-        {cvData.certificates.length > 0 && (
-          <Section title="Sertifikalar" accent={template === 'minimal' ? '#555' : cvData.accent}>
-            {cvData.certificates.map((item) => (
-              <Item key={item.id} title={item.name} subtitle={`${item.org} • ${item.date}`} />
-            ))}
-          </Section>
-        )}
-
-        <div className="inline-grid">
-          {cvData.skills.length > 0 && (
-            <Section title="Teknik Beceriler" accent={template === 'minimal' ? '#555' : cvData.accent}>
-              <ul className="pill-list">{cvData.skills.map((s) => <li key={s}>{s}</li>)}</ul>
-            </Section>
-          )}
-          {cvData.competencies.length > 0 && (
-            <Section title="Yetkinlikler" accent={template === 'minimal' ? '#555' : cvData.accent}>
-              <ul className="pill-list">{cvData.competencies.map((c) => <li key={c}>{c}</li>)}</ul>
-            </Section>
-          )}
-        </div>
-
-        <div className="inline-grid">
-          {cvData.languages.length > 0 && (
-            <Section title="Yabancı Diller" accent={template === 'minimal' ? '#555' : cvData.accent}>
-              <ul>{cvData.languages.map((item) => <li key={item.lang}>{item.lang} ({item.level})</li>)}</ul>
-            </Section>
-          )}
-          {cvData.interests.length > 0 && (
-            <Section title="İlgi Alanları" accent={template === 'minimal' ? '#555' : cvData.accent}>
-              <ul className="pill-list soft">{cvData.interests.map((i) => <li key={i}>{i}</li>)}</ul>
-            </Section>
-          )}
-        </div>
-
-        {cvData.references && cvData.references.length > 0 && (
-          <Section title="Referanslar" accent={template === 'minimal' ? '#555' : cvData.accent}>
-            <div className="inline-grid">
-              {cvData.references.map((ref, i) => (
-                <div key={i} className="reference-item">
-                  <p className="item__title">{ref.name}</p>
-                  {ref.title && <p className="muted" style={{ margin: '2px 0' }}>{ref.title}{ref.company ? ` • ${ref.company}` : ''}</p>}
-                  <p className="muted" style={{ fontSize: '0.82em' }}>
-                    {[ref.phone, ref.email].filter(Boolean).join(' | ')}
-                  </p>
+        <div className="cv-blueprint__body">
+          <main className="cv-blueprint__main">
+            {cvData.objective && (
+              <section className="cv-blueprint__section">
+                <h2 className="cv-blueprint__h2">Hakkımda</h2>
+                <p className="cv-blueprint__p">{cvData.objective}</p>
+              </section>
+            )}
+            {cvData.experience.length > 0 && (
+              <section className="cv-blueprint__section">
+                <h2 className="cv-blueprint__h2">İş Deneyimi</h2>
+                {cvData.experience.map((item) => (
+                  <div key={item.id} className="cv-blueprint__entry">
+                    <p className="cv-blueprint__entry-title">{item.company}</p>
+                    <p className="cv-blueprint__entry-meta">
+                      {formatLocation(item.city, item.district)}
+                      {formatLocation(item.city, item.district) && ' · '}
+                      {formatDateRange(item.startDate, item.endDate, item.ongoing)}
+                    </p>
+                    {item.details?.length > 0 && (
+                      <ul className="cv-blueprint__ul">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>
+                    )}
+                  </div>
+                ))}
+              </section>
+            )}
+            {cvData.education.length > 0 && (
+              <section className="cv-blueprint__section">
+                <h2 className="cv-blueprint__h2">Eğitim Bilgisi</h2>
+                {cvData.education.map((item) => (
+                  <div key={item.id} className="cv-blueprint__entry">
+                    <p className="cv-blueprint__entry-title">{item.school}</p>
+                    <p className="cv-blueprint__entry-meta">
+                      {formatLocation(item.city, item.district)}
+                      {formatLocation(item.city, item.district) && ' · '}
+                      {formatDateRange(item.startDate, item.endDate, item.ongoing)}
+                    </p>
+                    {item.note && <p className="cv-blueprint__p">{item.note}</p>}
+                  </div>
+                ))}
+              </section>
+            )}
+            {cvData.projects.length > 0 && (
+              <section className="cv-blueprint__section">
+                <h2 className="cv-blueprint__h2">Projeler</h2>
+                {cvData.projects.map((item) => (
+                  <div key={item.id} className="cv-blueprint__entry">
+                    <p className="cv-blueprint__entry-title">{item.name}</p>
+                    <p className="cv-blueprint__entry-meta">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</p>
+                    {item.details?.length > 0 && (
+                      <ul className="cv-blueprint__ul">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>
+                    )}
+                  </div>
+                ))}
+              </section>
+            )}
+          </main>
+          <aside className="cv-blueprint__aside">
+            <section className="cv-blueprint__aside-block">
+              <h3 className="cv-blueprint__h3">Kişisel Bilgiler</h3>
+              {formatBirthDate() && (
+                <div className="cv-blueprint__kv">
+                  <strong>Doğum tarihi</strong>
+                  <span>{formatBirthDate()}</span>
                 </div>
-              ))}
-            </div>
-          </Section>
-        )}
+              )}
+              {(cvData.city || cvData.district) && (
+                <div className="cv-blueprint__kv">
+                  <strong>Konum</strong>
+                  <span>{formatLocation(cvData.city, cvData.district)}</span>
+                </div>
+              )}
+              {cvData.websiteUrl && (
+                <div className="cv-blueprint__kv">
+                  <strong>Web</strong>
+                  <span>{cvData.websiteUrl}</span>
+                </div>
+              )}
+            </section>
+            {cvData.skills.length > 0 && (
+              <section className="cv-blueprint__aside-block">
+                <h3 className="cv-blueprint__h3">Yetenekler</h3>
+                {cvData.skills.map((s, i) => (
+                  <div key={s} className="cv-blueprint__skill">
+                    <strong>{s}</strong>
+                    <span>{['İyi', 'Çok iyi', 'İleri'][i % 3]}</span>
+                  </div>
+                ))}
+              </section>
+            )}
+            {(cvData.certificates.length > 0 || cvData.activities.length > 0) && (
+              <section className="cv-blueprint__aside-block">
+                <h3 className="cv-blueprint__h3">Seminer ve Kurslar</h3>
+                {cvData.certificates.map((c) => (
+                  <div key={c.id} className="cv-blueprint__entry cv-blueprint__entry--small">
+                    <p className="cv-blueprint__entry-title">{c.name}</p>
+                    <p className="cv-blueprint__entry-meta">{c.org || c.issuer} · {c.date}</p>
+                  </div>
+                ))}
+                {cvData.activities.map((a) => (
+                  <div key={a.id} className="cv-blueprint__entry cv-blueprint__entry--small">
+                    <p className="cv-blueprint__entry-title">{a.name}</p>
+                    <p className="cv-blueprint__entry-meta">{formatDateRange(a.startDate, a.endDate, a.ongoing)}</p>
+                  </div>
+                ))}
+              </section>
+            )}
+            {qrDataUrl && <img src={qrDataUrl} alt="QR" width="56" height="56" className="cv-blueprint__qr" />}
+          </aside>
+        </div>
       </div>
     )
   }
 
-  const renderModernCv = (innerRef = null) => (
-    <div className="cv-page cv-page--modern" ref={innerRef}>
-      <div className="cv-modern__header" style={{ backgroundColor: cvData.accent }}>
+  const renderMinimalCv = (innerRef = null) => (
+    <div className="cv-page cv-page--sema" ref={innerRef}>
+      <header className="cv-sema__head">
         {cvData.avatar && (
-          <div className={`avatar avatar--modern ${getAvatarClass()}`}>
-            <img src={cvData.avatar} alt={cvData.name || 'Aday'} width="100" height="100" style={{ display: 'block' }} />
+          <div className={`avatar cv-sema__avatar ${getAvatarClass()}`}>
+            <img src={cvData.avatar} alt="" width="88" height="88" style={{ display: 'block' }} />
           </div>
         )}
-        <div className="cv-modern__header-text">
-          <h1>{cvData.name || 'Ad Soyad'}</h1>
-          <p className="cv__title">{cvData.title || 'Hedef Pozisyon / Ünvan'}</p>
-        </div>
-        {qrDataUrl && <div className="cv__qr cv__qr--modern"><img src={qrDataUrl} alt="QR" width="64" height="64" /></div>}
+        <h1 className="cv-sema__name">{(cvData.name || 'Ad Soyad').toLocaleUpperCase('tr-TR')}</h1>
+        <div className="cv-sema__badge" aria-hidden="true">CV</div>
+      </header>
+      <div className="cv-sema__contact-bar">
+        {(cvData.city || cvData.district) && <span>🏠 {formatLocation(cvData.city, cvData.district)}</span>}
+        {cvData.phone && <span>📞 {cvData.phone}</span>}
+        {cvData.email && <span>✉️ {cvData.email}</span>}
       </div>
+      <div className="cv-sema__rule" />
 
-      <div className="cv-modern__body">
-        <aside className="cv-modern__sidebar" style={{ borderColor: cvData.accent }}>
-          <div className="cv-modern__sidebar-section">
-            <h4 style={{ color: cvData.accent }}>İletişim</h4>
-            {(cvData.city || cvData.district) && <p>📍 {formatLocation(cvData.city, cvData.district)}</p>}
-            {cvData.phone && <p>📞 {cvData.phone}</p>}
-            {cvData.email && <p>✉️ {cvData.email}</p>}
-            {formatBirthDate() && <p>🎂 {formatBirthDate()}</p>}
-            {cvData.websiteUrl && <p>🔗 {cvData.websiteUrl}</p>}
+      <div className="cv-sema__grid-4">
+        <div className="cv-sema__cell">
+          <strong>Doğum tarihi</strong>
+          <span>{formatBirthDate() || '—'}</span>
+        </div>
+        <div className="cv-sema__cell">
+          <strong>Konum</strong>
+          <span>{formatLocation(cvData.city, cvData.district) || '—'}</span>
+        </div>
+        <div className="cv-sema__cell">
+          <strong>E-posta</strong>
+          <span>{cvData.email || '—'}</span>
+        </div>
+        <div className="cv-sema__cell">
+          <strong>Web / LinkedIn</strong>
+          <span>{cvData.websiteUrl || '—'}</span>
+        </div>
+      </div>
+      <div className="cv-sema__rule" />
+
+      {cvData.objective && (
+        <>
+          <p className="cv-sema__summary">{cvData.objective}</p>
+          <div className="cv-sema__rule" />
+        </>
+      )}
+
+      {cvData.experience.length > 0 && (
+        <>
+          <h2 className="cv-sema__h2">İş deneyimi</h2>
+          {cvData.experience.map((item) => (
+            <div key={item.id} className="cv-sema__block">
+              <div className="cv-sema__row-between">
+                <span className="cv-sema__role">{item.company}</span>
+                <span className="cv-sema__dates">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
+              </div>
+              {formatLocation(item.city, item.district) && (
+                <p className="cv-sema__sub">{formatLocation(item.city, item.district)}</p>
+              )}
+              {item.details?.length > 0 && (
+                <ul className="cv-sema__ul">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>
+              )}
+            </div>
+          ))}
+          <div className="cv-sema__rule" />
+        </>
+      )}
+
+      {cvData.education.length > 0 && (
+        <>
+          <h2 className="cv-sema__h2">Eğitim ve nitelikler</h2>
+          {cvData.education.map((item) => (
+            <div key={item.id} className="cv-sema__block">
+              <div className="cv-sema__row-between">
+                <span className="cv-sema__role">{item.school}</span>
+                <span className="cv-sema__dates">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
+              </div>
+              {formatLocation(item.city, item.district) && (
+                <p className="cv-sema__sub">{formatLocation(item.city, item.district)}</p>
+              )}
+              {item.note && <p className="cv-sema__note">{item.note}</p>}
+            </div>
+          ))}
+          <div className="cv-sema__rule" />
+        </>
+      )}
+
+      {cvData.skills.length > 0 && (
+        <>
+          <h2 className="cv-sema__h2">Beceriler</h2>
+          <div className="cv-sema__skills-table">
+            {cvData.skills.map((s, i) => (
+              <div key={s} className="cv-sema__skill-row">
+                <span className="cv-sema__skill-name">{s}</span>
+                <CvSkillDots filled={3 + (i % 3)} />
+                <span className="cv-sema__skill-lbl">{['İyi', 'Çok iyi', 'İleri'][i % 3]}</span>
+              </div>
+            ))}
           </div>
+        </>
+      )}
+    </div>
+  )
 
+  const renderCv = (innerRef = null) => {
+    if (template === 'modern') return renderModernCv(innerRef)
+    if (template === 'creative') return renderCreativeCv(innerRef)
+    if (template === 'compact') return renderCompactCv(innerRef)
+    if (template === 'minimal') return renderMinimalCv(innerRef)
+    return renderClassicCv(innerRef)
+  }
+
+  const renderModernCv = (innerRef = null) => (
+    <div className="cv-page cv-page--modern cv-page--modern-erkan" ref={innerRef}>
+      <header className="cv-erkan__hero">
+        <div className="cv-erkan__photo-wrap">
+          {cvData.avatar && (
+            <div className="avatar cv-erkan__avatar avatar--square">
+              <img src={cvData.avatar} alt="" width="110" height="110" style={{ display: 'block' }} />
+            </div>
+          )}
+        </div>
+        <div className="cv-erkan__hero-text">
+          <h1 className="cv-erkan__name">{(cvData.name || 'Ad Soyad').toLocaleUpperCase('tr-TR')}</h1>
+          <div className="cv-erkan__hero-rule" />
+          <div className="cv-erkan__title-banner">{cvData.title || 'Ünvan'}</div>
+        </div>
+      </header>
+
+      <div className="cv-erkan__body">
+        <aside className="cv-erkan__aside">
+          <div className="cv-erkan__block">
+            <h2 className="cv-erkan__h2">İletişim</h2>
+            {cvData.phone && <p className="cv-erkan__line">📞 {cvData.phone}</p>}
+            {cvData.email && <p className="cv-erkan__line">✉️ {cvData.email}</p>}
+            {cvData.websiteUrl && <p className="cv-erkan__line">🌐 {cvData.websiteUrl}</p>}
+            {(cvData.city || cvData.district) && <p className="cv-erkan__line">📍 {formatLocation(cvData.city, cvData.district)}</p>}
+          </div>
+          {cvData.objective && (
+            <div className="cv-erkan__block">
+              <h2 className="cv-erkan__h2">Hakkımda</h2>
+              <p className="cv-erkan__p">{cvData.objective}</p>
+            </div>
+          )}
           {cvData.skills.length > 0 && (
-            <div className="cv-modern__sidebar-section">
-              <h4 style={{ color: cvData.accent }}>Teknik Beceriler</h4>
-              <ul className="pill-list pill-list--sidebar">
+            <div className="cv-erkan__block">
+              <h2 className="cv-erkan__h2">Beceriler</h2>
+              <ul className="cv-erkan__ul">
                 {cvData.skills.map((s) => <li key={s}>{s}</li>)}
               </ul>
             </div>
           )}
-
-          {cvData.competencies.length > 0 && (
-            <div className="cv-modern__sidebar-section">
-              <h4 style={{ color: cvData.accent }}>Yetkinlikler</h4>
-              <ul className="pill-list pill-list--sidebar">
-                {cvData.competencies.map((c) => <li key={c}>{c}</li>)}
+          {cvData.languages.length > 0 && (
+            <div className="cv-erkan__block">
+              <h2 className="cv-erkan__h2">Diller</h2>
+              <ul className="cv-erkan__ul">
+                {cvData.languages.map((item) => {
+                  const label = item.lang || item.name || ''
+                  return (
+                    <li key={label}>{label}{item.level ? ` — ${item.level}` : ''}</li>
+                  )
+                })}
               </ul>
             </div>
           )}
-
-          {cvData.languages.length > 0 && (
-            <div className="cv-modern__sidebar-section">
-              <h4 style={{ color: cvData.accent }}>Yabancı Diller</h4>
-              {cvData.languages.map((item) => (
-                <div key={item.lang} className="cv-modern__lang-item">
-                  <span>{item.lang}</span>
-                  <span className="cv-modern__lang-level">{item.level}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {cvData.interests.length > 0 && (
-            <div className="cv-modern__sidebar-section">
-              <h4 style={{ color: cvData.accent }}>İlgi Alanları</h4>
-              <p className="muted" style={{ fontSize: '0.82em', lineHeight: 1.6 }}>{cvData.interests.join(', ')}</p>
-            </div>
-          )}
+          {qrDataUrl && <img src={qrDataUrl} alt="QR" width="56" height="56" className="cv-erkan__qr" />}
         </aside>
 
-        <main className="cv-modern__main">
-          {cvData.objective && (
-            <div className="cv-modern__section">
-              <h3 style={{ color: cvData.accent }}>Özet</h3>
-              <p className="muted">{cvData.objective}</p>
-            </div>
-          )}
-
+        <main className="cv-erkan__main">
           {cvData.experience.length > 0 && (
-            <div className="cv-modern__section">
-              <h3 style={{ color: cvData.accent }}>İş Deneyimi</h3>
+            <section className="cv-erkan__section">
+              <h2 className="cv-erkan__h3"><span className="cv-erkan__ico" aria-hidden>💼</span> İş Deneyimi</h2>
               {cvData.experience.map((item) => (
-                <Item key={item.id} title={item.company} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
-                  {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
-                </Item>
+                <div key={item.id} className="cv-erkan__job">
+                  <p className="cv-erkan__job-title">{item.company}</p>
+                  <p className="cv-erkan__job-meta">
+                    {formatLocation(item.city, item.district)}
+                    {formatLocation(item.city, item.district) ? ' · ' : ''}
+                    {formatDateRange(item.startDate, item.endDate, item.ongoing)}
+                  </p>
+                  {item.details?.length > 0 && item.details.map((d, i) => (
+                    <p key={i} className={i === 0 ? 'cv-erkan__job-desc' : 'cv-erkan__job-bullet'}>• {d}</p>
+                  ))}
+                </div>
               ))}
-            </div>
+            </section>
           )}
-
           {cvData.education.length > 0 && (
-            <div className="cv-modern__section">
-              <h3 style={{ color: cvData.accent }}>Eğitim</h3>
+            <section className="cv-erkan__section">
+              <h2 className="cv-erkan__h3"><span className="cv-erkan__ico" aria-hidden>🎓</span> Eğitim</h2>
               {cvData.education.map((item) => (
-                <Item key={item.id} title={item.school} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
-                  {item.note && <p className="muted">{item.note}</p>}
-                </Item>
+                <div key={item.id} className="cv-erkan__job">
+                  <p className="cv-erkan__job-title">{item.school}</p>
+                  <p className="cv-erkan__job-meta">
+                    {formatLocation(item.city, item.district)}
+                    {formatLocation(item.city, item.district) && ' · '}
+                    {formatDateRange(item.startDate, item.endDate, item.ongoing)}
+                  </p>
+                  {item.note && <p className="cv-erkan__job-desc">{item.note}</p>}
+                </div>
               ))}
-            </div>
+            </section>
           )}
-
-          {cvData.projects.length > 0 && (
-            <div className="cv-modern__section">
-              <h3 style={{ color: cvData.accent }}>Projeler</h3>
-              {cvData.projects.map((item) => (
-                <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)}>
-                  {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
-                </Item>
-              ))}
-            </div>
-          )}
-
-          {cvData.activities.length > 0 && (
-            <div className="cv-modern__section">
-              <h3 style={{ color: cvData.accent }}>Aktiviteler</h3>
-              {cvData.activities.map((item) => (
-                <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
-                  {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
-                </Item>
-              ))}
-            </div>
-          )}
-
           {cvData.certificates.length > 0 && (
-            <div className="cv-modern__section">
-              <h3 style={{ color: cvData.accent }}>Sertifikalar</h3>
+            <section className="cv-erkan__section">
+              <h2 className="cv-erkan__h3"><span className="cv-erkan__ico" aria-hidden>🏅</span> Sertifikalar</h2>
               {cvData.certificates.map((item) => (
-                <Item key={item.id} title={item.name} subtitle={`${item.org} • ${item.date}`} />
-              ))}
-            </div>
-          )}
-
-          {cvData.references && cvData.references.length > 0 && (
-            <div className="cv-modern__section">
-              <h3 style={{ color: cvData.accent }}>Referanslar</h3>
-              <div className="inline-grid">
-                {cvData.references.map((ref, i) => (
-                  <div key={i} className="reference-item">
-                    <p className="item__title">{ref.name}</p>
-                    {ref.title && <p className="muted" style={{ margin: '2px 0' }}>{ref.title}{ref.company ? ` • ${ref.company}` : ''}</p>}
-                    <p className="muted" style={{ fontSize: '0.82em' }}>{[ref.phone, ref.email].filter(Boolean).join(' | ')}</p>
+                <div key={item.id} className="cv-erkan__cert">
+                  <span className="cv-erkan__cert-date">{item.date}</span>
+                  <div>
+                    <strong className="cv-erkan__cert-name">{item.name}</strong>
+                    <p className="cv-erkan__job-meta">{item.org || item.issuer}</p>
                   </div>
-                ))}
-              </div>
-            </div>
+                </div>
+              ))}
+            </section>
           )}
         </main>
       </div>
@@ -1602,17 +1983,19 @@ function App() {
   )
 
   const renderCreativeCv = (innerRef = null) => (
-    <div className="cv-page cv-page--creative" ref={innerRef}>
-      <div className="cv-creative__sidebar" style={{ backgroundColor: cvData.accent }}>
-        {cvData.avatar && (
-          <div className={`avatar avatar--creative ${getAvatarClass()}`}>
-            <img src={cvData.avatar} alt={cvData.name || 'Aday'} width="90" height="90" style={{ display: 'block' }} />
-          </div>
-        )}
-        <div className="cv-creative__sidebar-name">
-          <h1>{cvData.name || 'Ad Soyad'}</h1>
-          <p>{cvData.title || 'Pozisyon'}</p>
-        </div>
+    <div
+      className="cv-page cv-page--creative"
+      ref={innerRef}
+      style={{ '--cv-accent': cvData.accent }}
+    >
+      <aside className="cv-creative__sidebar" aria-label="Profil özeti">
+        <div className="cv-creative__sidebar-accent" aria-hidden />
+        <div className="cv-creative__sidebar-inner">
+          {cvData.avatar && (
+            <div className={`avatar avatar--creative ${getAvatarClass()}`}>
+              <img src={cvData.avatar} alt="" width="90" height="90" style={{ display: 'block' }} />
+            </div>
+          )}
 
         <div className="cv-creative__sidebar-section">
           <h4>İletişim</h4>
@@ -1645,21 +2028,28 @@ function App() {
         {cvData.interests.length > 0 && (
           <div className="cv-creative__sidebar-section">
             <h4>İlgi Alanları</h4>
-            <p style={{ fontSize: '0.8em', lineHeight: 1.6, opacity: 0.85 }}>{cvData.interests.join(' · ')}</p>
+            <p className="cv-creative__sidebar-interests">{cvData.interests.join(' · ')}</p>
           </div>
         )}
-      </div>
+        </div>
+      </aside>
 
       <div className="cv-creative__main">
+        <header className="cv-creative__ribbon">
+          <h1 className="cv-creative__hero-name">{cvData.name || 'Ad Soyad'}</h1>
+          <div className="cv-creative__hero-line" aria-hidden />
+          <p className="cv-creative__hero-title">{(cvData.title || 'Pozisyon / Ünvan').toLocaleUpperCase('tr-TR')}</p>
+        </header>
+
         {cvData.objective && (
           <div className="cv-creative__section">
-            <h3 style={{ color: cvData.accent }}>Özet</h3>
-            <p className="muted">{cvData.objective}</p>
+            <h3 className="cv-creative__h3">Özet</h3>
+            <p className="cv-creative__body">{cvData.objective}</p>
           </div>
         )}
         {cvData.experience.length > 0 && (
           <div className="cv-creative__section">
-            <h3 style={{ color: cvData.accent }}>İş Deneyimi</h3>
+            <h3 className="cv-creative__h3">İş Deneyimi</h3>
             {cvData.experience.map(item => (
               <Item key={item.id} title={item.company} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
                 {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
@@ -1669,7 +2059,7 @@ function App() {
         )}
         {cvData.education.length > 0 && (
           <div className="cv-creative__section">
-            <h3 style={{ color: cvData.accent }}>Eğitim</h3>
+            <h3 className="cv-creative__h3">Eğitim</h3>
             {cvData.education.map(item => (
               <Item key={item.id} title={item.school} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
                 {item.note && <p className="muted">{item.note}</p>}
@@ -1679,7 +2069,7 @@ function App() {
         )}
         {cvData.projects.length > 0 && (
           <div className="cv-creative__section">
-            <h3 style={{ color: cvData.accent }}>Projeler</h3>
+            <h3 className="cv-creative__h3">Projeler</h3>
             {cvData.projects.map(item => (
               <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)}>
                 {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
@@ -1687,24 +2077,34 @@ function App() {
             ))}
           </div>
         )}
+        {cvData.activities.length > 0 && (
+          <div className="cv-creative__section">
+            <h3 className="cv-creative__h3">Aktiviteler</h3>
+            {cvData.activities.map(item => (
+              <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
+                {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
+              </Item>
+            ))}
+          </div>
+        )}
         {cvData.certificates.length > 0 && (
           <div className="cv-creative__section">
-            <h3 style={{ color: cvData.accent }}>Sertifikalar</h3>
+            <h3 className="cv-creative__h3">Sertifikalar</h3>
             {cvData.certificates.map(item => <Item key={item.id} title={item.name} subtitle={`${item.org} · ${item.date}`} />)}
           </div>
         )}
         {cvData.competencies.length > 0 && (
           <div className="cv-creative__section">
-            <h3 style={{ color: cvData.accent }}>Yetkinlikler</h3>
-            <ul className="pill-list">{cvData.competencies.map(c => <li key={c}>{c}</li>)}</ul>
+            <h3 className="cv-creative__h3">Yetkinlikler</h3>
+            <ul className="cv-creative__pill-list">{cvData.competencies.map(c => <li key={c}>{c}</li>)}</ul>
           </div>
         )}
         {cvData.references && cvData.references.length > 0 && (
           <div className="cv-creative__section">
-            <h3 style={{ color: cvData.accent }}>Referanslar</h3>
+            <h3 className="cv-creative__h3">Referanslar</h3>
             <div className="inline-grid">
               {cvData.references.map((ref, i) => (
-                <div key={i} className="reference-item">
+                <div key={i} className="reference-item reference-item--creative">
                   <p className="item__title">{ref.name}</p>
                   {ref.title && <p className="muted" style={{ margin: '2px 0' }}>{ref.title}{ref.company ? ` • ${ref.company}` : ''}</p>}
                   <p className="muted" style={{ fontSize: '0.82em' }}>{[ref.phone, ref.email].filter(Boolean).join(' | ')}</p>
@@ -1718,129 +2118,106 @@ function App() {
   )
 
   const renderCompactCv = (innerRef = null) => (
-    <div className="cv-page cv-page--compact" ref={innerRef}>
-      <div className="cv-compact__header" style={{ borderBottomColor: cvData.accent }}>
-        <div className="cv-compact__header-left">
-          {cvData.avatar && (
-            <div className={`avatar avatar--compact ${getAvatarClass()}`}>
-              <img src={cvData.avatar} alt={cvData.name || 'Aday'} width="70" height="70" style={{ display: 'block' }} />
-            </div>
-          )}
-          <div>
-            <h1 className="cv-compact__name">{cvData.name || 'Ad Soyad'}</h1>
-            <p className="cv-compact__title" style={{ color: cvData.accent }}>{cvData.title || 'Pozisyon'}</p>
+    <div className="cv-page cv-page--compact cv-page--ayla" ref={innerRef}>
+      <header className="cv-ayla__frame">
+        {cvData.avatar && (
+          <div className={`avatar cv-ayla__frame-photo avatar--square`}>
+            <img src={cvData.avatar} alt="" width="96" height="96" style={{ display: 'block' }} />
           </div>
-        </div>
-        <div className="cv-compact__contact">
-          {cvData.email && <span>✉ {cvData.email}</span>}
-          {cvData.phone && <span>📞 {cvData.phone}</span>}
-          {(cvData.city || cvData.district) && <span>📍 {formatLocation(cvData.city, cvData.district)}</span>}
-          {cvData.websiteUrl && <span>🔗 {cvData.websiteUrl}</span>}
-          {qrDataUrl && <img src={qrDataUrl} alt="QR" width="50" height="50" style={{ borderRadius: 4 }} />}
-        </div>
-      </div>
+        )}
+        <h1 className="cv-ayla__frame-name">{(cvData.name || 'Ad Soyad').toLocaleUpperCase('tr-TR')}</h1>
+        {qrDataUrl && <img src={qrDataUrl} alt="QR" width="48" height="48" className="cv-ayla__frame-qr" />}
+      </header>
 
-      {cvData.objective && (
-        <div className="cv-compact__section">
-          <h3 style={{ color: cvData.accent }}>Özet</h3>
-          <p className="muted cv-compact__text">{cvData.objective}</p>
-        </div>
-      )}
-
-      <div className="cv-compact__two-col">
-        <div className="cv-compact__col-main">
-          {cvData.experience.length > 0 && (
-            <div className="cv-compact__section">
-              <h3 style={{ color: cvData.accent }}>Deneyim</h3>
-              {cvData.experience.map(item => (
-                <div key={item.id} className="cv-compact__item">
-                  <div className="cv-compact__item-head">
-                    <strong>{item.company}</strong>
-                    <span className="cv-compact__date">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
-                  </div>
-                  {formatLocation(item.city, item.district) && <p className="cv-compact__loc">📍 {formatLocation(item.city, item.district)}</p>}
-                  {item.details.length > 0 && <ul className="cv-compact__bullets">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
-                </div>
-              ))}
-            </div>
-          )}
-          {cvData.education.length > 0 && (
-            <div className="cv-compact__section">
-              <h3 style={{ color: cvData.accent }}>Eğitim</h3>
-              {cvData.education.map(item => (
-                <div key={item.id} className="cv-compact__item">
-                  <div className="cv-compact__item-head">
-                    <strong>{item.school}</strong>
-                    <span className="cv-compact__date">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
-                  </div>
-                  {item.note && <p className="muted cv-compact__text">{item.note}</p>}
-                </div>
-              ))}
-            </div>
-          )}
-          {cvData.projects.length > 0 && (
-            <div className="cv-compact__section">
-              <h3 style={{ color: cvData.accent }}>Projeler</h3>
-              {cvData.projects.map(item => (
-                <div key={item.id} className="cv-compact__item">
-                  <div className="cv-compact__item-head">
-                    <strong>{item.name}</strong>
-                    <span className="cv-compact__date">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
-                  </div>
-                  {item.details.length > 0 && <ul className="cv-compact__bullets">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="cv-compact__col-side">
+      <div className="cv-ayla__split">
+        <aside className="cv-ayla__side">
+          <section className="cv-ayla__block">
+            <h2 className="cv-ayla__h2">Kişisel bilgiler</h2>
+            <div className="cv-ayla__kv"><strong>Ad</strong><span>{cvData.name || '—'}</span></div>
+            <div className="cv-ayla__kv"><strong>Adres</strong><span>{formatLocation(cvData.city, cvData.district) || '—'}</span></div>
+            <div className="cv-ayla__kv"><strong>Telefon</strong><span>{cvData.phone || '—'}</span></div>
+            <div className="cv-ayla__kv"><strong>E-posta</strong><span>{cvData.email || '—'}</span></div>
+            <div className="cv-ayla__kv"><strong>Doğum tarihi</strong><span>{formatBirthDate() || '—'}</span></div>
+            {cvData.websiteUrl && (
+              <div className="cv-ayla__kv"><strong>Web</strong><span>{cvData.websiteUrl}</span></div>
+            )}
+          </section>
           {cvData.skills.length > 0 && (
-            <div className="cv-compact__section">
-              <h3 style={{ color: cvData.accent }}>Beceriler</h3>
-              <div className="cv-compact__tags">{cvData.skills.map(s => <span key={s} className="cv-compact__tag" style={{ borderColor: cvData.accent }}>{s}</span>)}</div>
-            </div>
+            <section className="cv-ayla__block">
+              <h2 className="cv-ayla__h2">Beceriler</h2>
+              {cvData.skills.map((s, i) => (
+                <div key={s} className="cv-ayla__skill-row">
+                  <span>{s}</span>
+                  <CvSkillDots filled={4 + (i % 2)} />
+                </div>
+              ))}
+            </section>
           )}
           {cvData.languages.length > 0 && (
-            <div className="cv-compact__section">
-              <h3 style={{ color: cvData.accent }}>Diller</h3>
-              {cvData.languages.map(l => (
-                <div key={l.lang} className="cv-compact__lang">
-                  <span>{l.lang}</span><span style={{ color: cvData.accent, fontSize: '0.8em' }}>{l.level}</span>
+            <section className="cv-ayla__block">
+              <h2 className="cv-ayla__h2">Diller</h2>
+              {cvData.languages.map((l) => {
+                const label = l.lang || l.name || ''
+                return (
+                  <div key={label} className="cv-ayla__skill-row">
+                    <span>{label}</span>
+                    <CvSkillDots filled={cvLanguageLevelDots(l.level)} />
+                  </div>
+                )
+              })}
+            </section>
+          )}
+        </aside>
+
+        <main className="cv-ayla__main">
+          {cvData.objective && <p className="cv-ayla__lead">{cvData.objective}</p>}
+          {cvData.experience.length > 0 && (
+            <section className="cv-ayla__main-section">
+              <h2 className="cv-ayla__h2-main">İş tecrübesi</h2>
+              {cvData.experience.map((item) => (
+                <div key={item.id} className="cv-ayla__entry">
+                  <div className="cv-ayla__row-between">
+                    <strong className="cv-ayla__entry-title">{item.company}</strong>
+                    <span className="cv-ayla__dates">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
+                  </div>
+                  {formatLocation(item.city, item.district) && (
+                    <p className="cv-ayla__sub">{formatLocation(item.city, item.district)}</p>
+                  )}
+                  {item.details?.length > 0 && <p className="cv-ayla__text">{item.details[0]}</p>}
+                  {item.details?.length > 1 && (
+                    <ul className="cv-ayla__ul">{item.details.slice(1).map((d, i) => <li key={i}>{d}</li>)}</ul>
+                  )}
                 </div>
               ))}
-            </div>
+            </section>
           )}
-          {cvData.certificates.length > 0 && (
-            <div className="cv-compact__section">
-              <h3 style={{ color: cvData.accent }}>Sertifikalar</h3>
-              {cvData.certificates.map(item => (
-                <div key={item.id} className="cv-compact__item">
-                  <strong style={{ fontSize: '0.83em' }}>{item.name}</strong>
-                  <p className="muted cv-compact__text">{item.org} · {item.date}</p>
+          {cvData.education.length > 0 && (
+            <section className="cv-ayla__main-section">
+              <h2 className="cv-ayla__h2-main">Eğitim</h2>
+              {cvData.education.map((item) => (
+                <div key={item.id} className="cv-ayla__entry">
+                  <div className="cv-ayla__row-between">
+                    <strong className="cv-ayla__entry-title">{item.school}</strong>
+                    <span className="cv-ayla__dates">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
+                  </div>
+                  {formatLocation(item.city, item.district) && (
+                    <p className="cv-ayla__sub">{formatLocation(item.city, item.district)}</p>
+                  )}
+                  {item.note && <p className="cv-ayla__text">{item.note}</p>}
                 </div>
               ))}
-            </div>
+            </section>
           )}
-          {cvData.competencies.length > 0 && (
-            <div className="cv-compact__section">
-              <h3 style={{ color: cvData.accent }}>Yetkinlikler</h3>
-              <div className="cv-compact__tags">{cvData.competencies.map(c => <span key={c} className="cv-compact__tag" style={{ borderColor: cvData.accent }}>{c}</span>)}</div>
-            </div>
-          )}
-          {cvData.interests.length > 0 && (
-            <div className="cv-compact__section">
-              <h3 style={{ color: cvData.accent }}>İlgi Alanları</h3>
-              <p className="muted cv-compact__text" style={{ fontSize: '0.82em' }}>{cvData.interests.join(', ')}</p>
-            </div>
-          )}
-        </div>
+        </main>
       </div>
     </div>
   )
 
-  const loadExampleCV = (exampleData) => {
-    setCvData(exampleData)
+  const loadExampleCV = (example) => {
+    setCvData(example.data)
+    if (example.template && CV_TEMPLATE_CATALOG.some((t) => t.id === example.template)) {
+      setTemplate(example.template)
+    }
     setMode('preview')
     setIsExampleMode(true)
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -1850,6 +2227,7 @@ function App() {
     setCvData(defaultData)
     setMode('edit')
     setIsExampleMode(false)
+    setTemplate('classic')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -2100,14 +2478,17 @@ function App() {
     }
   }
 
-  // Form üzerinde herhangi bir yere tıklandığında login zorunlu olsun
+  // Form üzerinde tıklanınca giriş istenir; örnek CV paneli ve AI yükleme çubuğu hariç
   const handleEditorClickCapture = (e) => {
-    if (!authLoading && !user) {
-      e.preventDefault()
-      e.stopPropagation()
-      alert('Devam etmek için önce giriş yapmalısınız.')
-      setShowLogin(true)
+    if (authLoading || user) return
+    const t = e.target
+    if (typeof t.closest === 'function') {
+      if (t.closest('.floating-examples') || t.closest('.cv-upload-bar')) return
     }
+    e.preventDefault()
+    e.stopPropagation()
+    alert('Düzenlemek için önce giriş yapmalısınız. Örnek CV’leri giriş yapmadan inceleyebilirsiniz.')
+    setShowLogin(true)
   }
 
   return (
@@ -2155,21 +2536,27 @@ function App() {
 
       {/* Floating Örnek CV Kutucukları */}
       {mode === 'edit' && (
-        <div className="floating-examples">
+        <div className="floating-examples" data-public-examples>
           <div className="floating-examples__label">Örnek CV'ler</div>
           {exampleCVs.map((example, index) => (
             <button
               key={example.id}
+              type="button"
               className="floating-card"
-              style={{ 
+              style={{
                 '--card-color': example.color,
-                '--card-delay': `${index * 0.5}s`
+                '--card-delay': `${index * 0.35}s`,
               }}
-              onClick={() => loadExampleCV(example.data)}
-              title={`${example.title} örneğini yükle`}
+              onClick={(ev) => {
+                ev.preventDefault()
+                ev.stopPropagation()
+                loadExampleCV(example)
+              }}
+              title={`${example.templateLabel} şablon — ${example.title} (giriş gerekmez)`}
             >
               <span className="floating-card__icon">{example.icon}</span>
               <span className="floating-card__title">{example.title}</span>
+              <span className="floating-card__template">{example.templateLabel}</span>
             </button>
           ))}
         </div>
@@ -3041,20 +3428,18 @@ function App() {
 
           <div className="preview-template-bar">
             <span className="preview-template-bar__label">Şablon:</span>
-            {[
-              { id: 'classic', label: 'Klasik', icon: '📋' },
-              { id: 'modern', label: 'Modern', icon: '🗂️' },
-              { id: 'minimal', label: 'Minimal', icon: '🤍' },
-              { id: 'creative', label: 'Yaratıcı', icon: '🎨' },
-              { id: 'compact', label: 'Kompakt', icon: '⚡' },
-            ].map((t) => (
+            {CV_TEMPLATE_CATALOG.map((t) => (
               <button
                 key={t.id}
-                className={`preview-template-btn ${template === t.id ? 'active' : ''}`}
+                type="button"
+                className={`preview-template-btn ${template === t.id ? 'active' : ''} preview-template-btn--premium`}
                 onClick={() => setTemplate(t.id)}
               >
                 <span className="preview-template-btn__icon">{t.icon}</span>
-                <span className="preview-template-btn__name">{t.label}</span>
+                <span className="preview-template-btn__meta">
+                  <span className="preview-template-btn__name">{t.label}</span>
+                  <span className="preview-template-btn__price">+₺{t.priceTry} PDF</span>
+                </span>
               </button>
             ))}
             <div className="preview-template-bar__color">
@@ -3085,6 +3470,10 @@ function App() {
           onSaveAndDownload={handleSaveAndDownload}
           onDownloadOnly={handleDownloadOnly}
           isLoggedIn={!!user}
+          templateLabel={pdfPricing.templateLabel}
+          templateExtraTry={pdfPricing.templateExtraTry}
+          saveTotalTry={pdfPricing.saveTotalTry}
+          downloadTotalTry={pdfPricing.downloadTotalTry}
         />
       )}
       {isLoggingIn && (
@@ -3147,7 +3536,16 @@ function LoginModal({ onClose, onGoogleLogin }) {
   )
 }
 
-function PdfDownloadModal({ onClose, onSaveAndDownload, onDownloadOnly, isLoggedIn }) {
+function PdfDownloadModal({
+  onClose,
+  onSaveAndDownload,
+  onDownloadOnly,
+  isLoggedIn,
+  templateLabel,
+  templateExtraTry,
+  saveTotalTry,
+  downloadTotalTry,
+}) {
   return (
     <div className="login-modal-overlay" onClick={onClose}>
       <div className="login-modal" onClick={(e) => e.stopPropagation()}>
@@ -3160,8 +3558,29 @@ function PdfDownloadModal({ onClose, onSaveAndDownload, onDownloadOnly, isLogged
         </div>
         <div className="login-modal__body">
           <p className="login-modal__text">
-            CV'nizi kaydetmek ve indirmek için bir seçenek belirleyin.
+            Seçili şablon: <strong>{templateLabel}</strong>
+            {' '}(PDF fiyatına <strong>+₺{templateExtraTry}</strong> şablon ücreti eklenir).
           </p>
+          <div className="pdf-modal__breakdown">
+            {isLoggedIn && (
+              <div className="pdf-modal__breakdown-row">
+                <span>Kaydet ve İndir</span>
+                <span>
+                  100 TL + {templateExtraTry} TL
+                  {' → '}
+                  <strong>{saveTotalTry} TL</strong>
+                </span>
+              </div>
+            )}
+            <div className="pdf-modal__breakdown-row">
+              <span>Sadece İndir</span>
+              <span>
+                50 TL + {templateExtraTry} TL
+                {' → '}
+                <strong>{downloadTotalTry} TL</strong>
+              </span>
+            </div>
+          </div>
           {isLoggedIn && (
             <p className="login-modal__warning">
               ⚠️ Kaydedilen CV'ler 1 hafta sonra otomatik olarak silinir.
@@ -3170,11 +3589,11 @@ function PdfDownloadModal({ onClose, onSaveAndDownload, onDownloadOnly, isLogged
           <div className="pdf-modal__buttons">
             {isLoggedIn && (
               <button className="btn primary login-modal__button" onClick={onSaveAndDownload}>
-                💾 Kaydet ve İndir — <strong>100 TL</strong>
+                💾 Kaydet ve İndir — <strong>{saveTotalTry} TL</strong>
               </button>
             )}
             <button className="btn ghost login-modal__button" onClick={onDownloadOnly}>
-              📄 Sadece İndir — <strong>50 TL</strong>
+              📄 Sadece İndir — <strong>{downloadTotalTry} TL</strong>
             </button>
           </div>
           {!isLoggedIn && (
