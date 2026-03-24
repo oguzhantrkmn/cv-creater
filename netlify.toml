@@ -1,3 +1,9 @@
+# React SPA: tüm yollar index.html — yenilemede 404 ve tarama sorunlarını önler
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
 [[headers]]
   for = "/*"
   [headers.values]
