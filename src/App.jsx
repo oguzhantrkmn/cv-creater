@@ -3427,7 +3427,7 @@ function App() {
           </div>
 
           <div className="preview-template-bar">
-            <span className="preview-template-bar__label">Şablon:</span>
+            <span className="preview-template-bar__label">Şablonlar:</span>
             {CV_TEMPLATE_CATALOG.map((t) => (
               <button
                 key={t.id}

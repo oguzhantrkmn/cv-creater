@@ -2695,7 +2695,7 @@ html.dark .template-selector {
 .preview-template-bar__label {
   font-size: 12px;
   font-weight: 700;
-  color: var(--color-medium);
+  color: #111111;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-right: 4px;
@@ -2776,7 +2776,7 @@ html.dark .template-selector {
 .preview-template-bar__color label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--color-medium);
+  color:#000;
 }
 .preview-template-bar__color input[type="color"] {
   width: 28px;
