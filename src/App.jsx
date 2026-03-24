@@ -293,6 +293,8 @@ function App() {
   const [showLogin, setShowLogin] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
   const [userCvs, setUserCvs] = useState([])
+  const [paytrLogs, setPaytrLogs] = useState([])
+  const [paytrLogsLoading, setPaytrLogsLoading] = useState(false)
   const [showPdfModal, setShowPdfModal] = useState(false)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
@@ -785,12 +787,13 @@ function App() {
         }
 
         if (!paid) {
-          alert(
+          showToast(
             'Ödeme onayı sunucudan henüz gelmedi. PayTR bildirim URL ayarını kontrol edin veya bir dakika sonra sayfayı yenileyin.'
           )
           return
         }
 
+        showToast('Odemeniz alindi. PDF hazirlaniyor...', 'info')
         localStorage.setItem('paidTimestamp', Date.now().toString())
         setMode('preview')
         setHasPaid(true)
@@ -837,16 +840,16 @@ function App() {
             localStorage.removeItem('paidTimestamp')
             localStorage.removeItem('cvDataForPayment')
           } else {
-            alert('Ödeme başarılı! PDF otomatik inmedi; Canlı Önizleme üzerinden tekrar deneyin.')
+            showToast('Ödeme başarılı! PDF otomatik inmedi; Canlı Önizleme üzerinden tekrar deneyin.', 'warning')
           }
         }, 2500)
       } catch (error) {
         console.error('PayTR success handler:', error)
-        alert('Ödeme doğrulanamadı.')
+        showToast('Ödeme doğrulanamadı.')
         localStorage.removeItem('cvDataForPayment')
       }
     },
-    [exportToPdf]
+    [exportToPdf, showToast]
   )
 
   // Sayfa yüklendiğinde localStorage'dan cvData'yı yükle
@@ -874,16 +877,16 @@ function App() {
       if (oid) {
         setTimeout(() => handlePaytrSuccess(oid, plan), 100)
       } else {
-        alert('Oturum bilgisi bulunamadı. Lütfen tekrar ödeme yapın.')
+        showToast('Oturum bilgisi bulunamadı. Lütfen tekrar ödeme yapın.')
       }
     } else if (paymentStatus === 'paytr_fail') {
-      alert('Ödeme tamamlanamadı veya iptal edildi.')
+      showToast('Ödeme tamamlanamadı veya iptal edildi.', 'warning')
       localStorage.removeItem('cvDataForPayment')
       localStorage.removeItem('paytr_merchant_oid')
       localStorage.removeItem('paytr_plan')
       window.history.replaceState({}, document.title, window.location.pathname)
     }
-  }, [handlePaytrSuccess, exportToPdf])
+  }, [handlePaytrSuccess, exportToPdf, showToast])
 
   const handlePayment = async () => {
     // PDF indirme modalını aç
@@ -916,7 +919,7 @@ function App() {
       })
       const data = await response.json()
       if (!response.ok) {
-        alert(data.error || 'Ödeme başlatılamadı')
+        showToast(data.error || 'Ödeme başlatılamadı')
         return
       }
       localStorage.setItem('paytr_merchant_oid', data.merchant_oid)
@@ -925,7 +928,7 @@ function App() {
       window.location.href = `https://www.paytr.com/odeme/guvenli/${data.token}`
     } catch (error) {
       console.error('PayTR başlatma hatası:', error)
-      alert('Ödeme sayfası açılamadı. Lütfen tekrar deneyin.')
+      showToast('Ödeme sayfası açılamadı. Lütfen tekrar deneyin.')
     }
   }
 
@@ -948,7 +951,7 @@ function App() {
       })
       const data = await response.json()
       if (!response.ok) {
-        alert(data.error || 'Ödeme başlatılamadı')
+        showToast(data.error || 'Ödeme başlatılamadı')
         return
       }
       localStorage.setItem('paytr_merchant_oid', data.merchant_oid)
@@ -957,7 +960,7 @@ function App() {
       window.location.href = `https://www.paytr.com/odeme/guvenli/${data.token}`
     } catch (error) {
       console.error('PayTR başlatma hatası:', error)
-      alert('Ödeme sayfası açılamadı. Lütfen tekrar deneyin.')
+      showToast('Ödeme sayfası açılamadı. Lütfen tekrar deneyin.')
     }
   }
 
@@ -2062,6 +2065,27 @@ function App() {
     }
   }
 
+  const loadAdminPaytrLogs = async () => {
+    if (!user?.is_admin) return
+    try {
+      setPaytrLogsLoading(true)
+      const token = localStorage.getItem('cvToken')
+      if (!token) return
+      const res = await fetch(`${API_URL}/api/admin/paytr-logs`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      setPaytrLogs(Array.isArray(data.logs) ? data.logs : [])
+    } catch (err) {
+      console.error('PayTR logs load error:', err)
+    } finally {
+      setPaytrLogsLoading(false)
+    }
+  }
+
   const handleLoadCv = (cv) => {
     if (!cv || !cv.data) return
     try {
@@ -2195,6 +2219,9 @@ function App() {
                   if (next && userCvs.length === 0) {
                     await loadUserCvs()
                   }
+                  if (next && user?.is_admin) {
+                    await loadAdminPaytrLogs()
+                  }
                 }}
               >
                 <span className="user-pill__avatar">
@@ -2207,6 +2234,8 @@ function App() {
                   ref={profilePopoverRef}
                   user={user}
                   cvs={userCvs}
+                  paytrLogs={paytrLogs}
+                  paytrLogsLoading={paytrLogsLoading}
                   onLogout={handleLogout}
                   onLoadCv={handleLoadCv}
                   onDeleteCv={handleDeleteCv}
@@ -3199,7 +3228,7 @@ function ConfirmModal({ onClose, onConfirm, title, message }) {
   )
 }
 
-const ProfilePopover = forwardRef(({ user, cvs, onLogout, onLoadCv, onDeleteCv }, ref) => {
+const ProfilePopover = forwardRef(({ user, cvs, paytrLogs, paytrLogsLoading, onLogout, onLoadCv, onDeleteCv }, ref) => {
   return (
     <div className="profile-popover" ref={ref}>
       <div className="profile-popover__top">
@@ -3260,6 +3289,44 @@ const ProfilePopover = forwardRef(({ user, cvs, onLogout, onLoadCv, onDeleteCv }
           ))}
         </div>
       </div>
+      {user.is_admin && (
+        <div className="profile-popover__section">
+          <div className="profile-popover__section-header">
+            <span className="profile-popover__section-icon">💳</span>
+            <p className="profile-popover__section-title">PayTR Callback Logları (Admin)</p>
+          </div>
+          <div className="profile-popover__cv-list">
+            {paytrLogsLoading && (
+              <div className="profile-popover__cv-empty">
+                <span className="profile-popover__cv-empty-icon">⏳</span>
+                <span>PayTR logları yükleniyor...</span>
+              </div>
+            )}
+            {!paytrLogsLoading && (!paytrLogs || paytrLogs.length === 0) && (
+              <div className="profile-popover__cv-empty">
+                <span className="profile-popover__cv-empty-icon">📭</span>
+                <span>Henüz callback logu yok.</span>
+              </div>
+            )}
+            {!paytrLogsLoading && paytrLogs && paytrLogs.map((log) => (
+              <div key={log.id} className="profile-popover__paytr-item">
+                <div className="profile-popover__paytr-line">
+                  <strong>OID:</strong> {log.merchant_oid || '-'}
+                </div>
+                <div className="profile-popover__paytr-line">
+                  <strong>Durum:</strong> {log.status || '-'} | <strong>Hash:</strong> {log.hash_ok ? 'OK' : 'FAIL'}
+                </div>
+                <div className="profile-popover__paytr-line">
+                  <strong>Tutar:</strong> {Number(log.total_amount || 0) / 100} TL
+                </div>
+                <div className="profile-popover__paytr-date">
+                  {log.created_at ? new Date(log.created_at).toLocaleString('tr-TR') : '-'}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="profile-popover__footer">
         <button className="btn ghost profile-popover__logout" onClick={onLogout}>
           <span className="profile-popover__logout-icon">🚪</span>

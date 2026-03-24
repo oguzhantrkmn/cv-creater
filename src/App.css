@@ -1141,6 +1141,27 @@ html.dark .cv-upload-bar__desc  { color: rgba(232,222,206,0.6); }
   transform: rotate(-15deg);
 }
 
+.profile-popover__paytr-item {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 109, 31, 0.08);
+  border: 1px solid rgba(255, 109, 31, 0.18);
+  margin-bottom: 8px;
+}
+
+.profile-popover__paytr-line {
+  font-size: 12px;
+  color: var(--color-dark);
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.profile-popover__paytr-date {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-medium);
+}
+
 /* Loading Overlay */
 .loading-overlay {
   position: fixed;

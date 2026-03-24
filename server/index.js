@@ -198,6 +198,18 @@ if (pool) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `)
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS paytr_callback_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        merchant_oid VARCHAR(64) NULL,
+        status VARCHAR(20) NULL,
+        total_amount INT NULL,
+        hash_ok TINYINT(1) NOT NULL DEFAULT 0,
+        payload JSON NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
     console.log('✅ Veritabanı tabloları hazır')
   } catch (error) {
     console.error('❌ Tablo oluşturma hatası:', error.message)
@@ -248,6 +260,11 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 
           let user
           if (rows.length > 0) {
+            const shouldBeAdmin = email && process.env.ADMIN_EMAIL === email ? 1 : 0
+            if (rows[0].is_admin !== shouldBeAdmin) {
+              await pool.query('UPDATE users SET is_admin = ? WHERE id = ?', [shouldBeAdmin, rows[0].id])
+              rows[0].is_admin = shouldBeAdmin
+            }
             user = rows[0]
           } else {
             const isAdmin = email && process.env.ADMIN_EMAIL === email ? 1 : 0
@@ -441,6 +458,28 @@ app.get('/api/admin/stats', authMiddleware, async (req, res) => {
   }
 })
 
+// Admin: PayTR callback logları (yalnızca admin)
+app.get('/api/admin/paytr-logs', authMiddleware, async (req, res) => {
+  try {
+    if (!req.user.is_admin) {
+      return res.status(403).json({ error: 'Admin yetkisi gerekiyor' })
+    }
+    if (!pool) {
+      return res.status(503).json({ error: 'Veritabanı yok' })
+    }
+    const [rows] = await pool.query(
+      `SELECT id, merchant_oid, status, total_amount, hash_ok, created_at
+       FROM paytr_callback_logs
+       ORDER BY id DESC
+       LIMIT 50`
+    )
+    res.json({ logs: rows })
+  } catch (err) {
+    console.error('Admin paytr logs error:', err)
+    res.status(500).json({ error: 'PayTR logları getirilemedi' })
+  }
+})
+
 // PayTR: ödeme başlat (iFrame token)
 app.post('/api/paytr/init', async (req, res) => {
   try {
@@ -559,7 +598,20 @@ app.post('/api/paytr/init', async (req, res) => {
   }
 })
 
-// PayTR bildirim URL (mağaza panelinde tanımlanmalı: https://SUNUCU/api/paytr/callback)
+// PayTR bildirim URL (mağaza panelinde: https://SUNUCU/api/paytr/callback)
+// GET: Tarayıcıdan kontrol için — gerçek bildirim PayTR'nin POST isteğidir
+app.get('/api/paytr/callback', (req, res) => {
+  res
+    .type('text/plain; charset=utf-8')
+    .send(
+      'CV Creater — PayTR bildirim adresi aktif.\n' +
+        'PayTR bu adrese POST ile ödeme sonucunu gönderir; tarayıcıdan GET ile test normalde boş görünür (hata değil).\n' +
+        'Panelde Bildirim URL tam olarak: ' +
+        SERVER_URL +
+        '/api/paytr/callback'
+    )
+})
+
 app.post('/api/paytr/callback', express.urlencoded({ extended: false, limit: '64kb' }), async (req, res) => {
   if (!paytrConfigured || !pool) {
     return res.status(200).send('OK')
@@ -579,8 +631,25 @@ app.post('/api/paytr/callback', express.urlencoded({ extended: false, limit: '64
     .createHmac('sha256', PAYTR_MERCHANT_KEY)
     .update(merchant_oid + PAYTR_MERCHANT_SALT + status + total_amount)
     .digest('base64')
+  const hashOk = calcHash === hash
 
-  if (calcHash !== hash) {
+  try {
+    await pool.query(
+      `INSERT INTO paytr_callback_logs (merchant_oid, status, total_amount, hash_ok, payload)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        merchant_oid || null,
+        status || null,
+        Number(total_amount) || null,
+        hashOk ? 1 : 0,
+        JSON.stringify(post || {}),
+      ]
+    )
+  } catch (e) {
+    console.error('PayTR callback log insert error:', e)
+  }
+
+  if (!hashOk) {
     console.error('PayTR callback: hash uyuşmazlığı')
     return res.status(200).send('HASH_FAIL')
   }
