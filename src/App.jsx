@@ -6,9 +6,9 @@ import './App.css'
 import turkeyLocationsData from './data/turkey-locations.json'
 
 // Backend API URL
-const API_URL = import.meta.env.VITE_API_URL || 
-  (import.meta.env.MODE === 'production' 
-    ? 'https://your-backend-url.herokuapp.com' // Backend URL'inizi buraya yazın
+const API_URL = import.meta.env.VITE_API_URL ||
+  (import.meta.env.MODE === 'production'
+    ? 'https://cv-creater.onrender.com' // Production backend (Netlify CSP ile uyumlu)
     : 'http://localhost:3001')
 
 /** Şablon PDF ek ücreti (TL); tüm şablonlar aynı — sunucu kuruş ile senkron */
