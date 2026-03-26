@@ -809,8 +809,8 @@ app.post('/api/ai/parse-cv', upload.single('cv'), async (req, res) => {
       return res.status(400).json({ error: 'CV dosyasından metin okunamadı. Lütfen metin tabanlı bir PDF veya Word dosyası kullanın.' })
     }
 
-    // Metni 6000 karakterle sınırla (token tasarrufu)
-    const truncated = text.slice(0, 6000)
+    // Metni token tasarrufu için sınırla (daha fazla alan için artırıldı)
+    const truncated = text.slice(0, 12000)
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -821,7 +821,7 @@ app.post('/api/ai/parse-cv', upload.single('cv'), async (req, res) => {
 CV METNİ:
 ${truncated}
 
-Şu JSON yapısını döndür (Türkçe veya İngilizce CV olabilir, tüm alanları doldurmaya çalış, bulamazsan boş bırak):
+Şu JSON yapısını döndür (Türkçe veya İngilizce CV olabilir, tüm anahtarları AYNEN bu şablondaki gibi döndür; bulamazsan boş string/false/boş dizi olarak bırak):
 {
   "name": "Ad Soyad",
   "title": "Ünvan / Pozisyon",
@@ -834,28 +834,58 @@ ${truncated}
   "birthYear": "yıl veya boş",
   "websiteUrl": "website veya LinkedIn URL",
   "objective": "Kariyer hedefi veya özet paragrafı",
+
   "skills": ["beceri1", "beceri2"],
-  "languages": [{"name": "Dil", "level": "Seviye"}],
+  "competencies": ["Yetkinlik1", "Yetkinlik2"],
+  "interests": ["İlgi1", "İlgi2"],
+  "languages": [{"lang": "Dil", "level": "Seviye"}],
+
+  "projects": [
+    {
+      "name": "Proje Adı",
+      "startDate": "Başlangıç",
+      "endDate": "Bitiş (boş olabilir)",
+      "ongoing": false,
+      "details": ["madde1", "madde2"]
+    }
+  ],
+  "activities": [
+    {
+      "name": "Kulüp / Rol",
+      "city": "Şehir",
+      "district": "İlçe (varsa)",
+      "startDate": "Başlangıç",
+      "endDate": "Bitiş (boş olabilir)",
+      "ongoing": false,
+      "details": ["madde1", "madde2"]
+    }
+  ],
+
   "experience": [
     {
-      "company": "Şirket Adı",
-      "position": "Pozisyon",
-      "startDate": "Başlangıç tarihi",
-      "endDate": "Bitiş tarihi veya Devam Ediyor",
+      "company": "Şirket / Pozisyon",
+      "city": "Şehir",
+      "district": "İlçe (varsa)",
+      "startDate": "Başlangıç",
+      "endDate": "Bitiş veya boş",
+      "ongoing": false,
       "details": ["madde1", "madde2"]
     }
   ],
   "education": [
     {
       "school": "Okul Adı",
+      "city": "Şehir",
+      "district": "İlçe (varsa)",
       "department": "Bölüm",
       "degree": "Derece (Lisans, Yüksek Lisans vb.)",
       "startDate": "Başlangıç",
-      "endDate": "Bitiş veya Devam Ediyor",
-      "gpa": "Not ortalaması (varsa)"
+      "endDate": "Bitiş veya boş",
+      "ongoing": false,
+      "note": "Not ortalaması / onur derecesi / varsa boş"
     }
   ],
-  "certificates": [{"name": "Sertifika adı", "issuer": "Veren kurum", "date": "Tarih"}],
+  "certificates": [{"name": "Sertifika adı", "org": "Veren kurum", "date": "Tarih"}],
   "references": [{"name": "Ad Soyad", "title": "Ünvan", "company": "Şirket", "phone": "", "email": ""}]
 }
 

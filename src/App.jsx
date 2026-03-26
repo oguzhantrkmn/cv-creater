@@ -615,12 +615,88 @@ function App() {
         birthYear:   d.birthYear   || prev.birthYear,
         websiteUrl:  d.websiteUrl  || prev.websiteUrl,
         objective:   d.objective   || prev.objective,
-        skills:      d.skills?.length      ? d.skills      : prev.skills,
-        languages:   d.languages?.length   ? d.languages.map((l, i) => ({ id: Date.now() + i, name: l.name || l, level: l.level || '' })) : prev.languages,
-        experience:  d.experience?.length  ? d.experience.map((e, i) => ({ id: Date.now() + i + 100, company: e.company || '', position: e.position || '', startDate: e.startDate || '', endDate: e.endDate || '', details: e.details || [] })) : prev.experience,
-        education:   d.education?.length   ? d.education.map((e, i) => ({ id: Date.now() + i + 200, school: e.school || '', department: e.department || '', degree: e.degree || '', startDate: e.startDate || '', endDate: e.endDate || '', gpa: e.gpa || '' })) : prev.education,
-        certificates: d.certificates?.length ? d.certificates.map((c, i) => ({ id: Date.now() + i + 300, name: c.name || c, issuer: c.issuer || '', date: c.date || '' })) : prev.certificates,
-        references:  d.references?.length  ? d.references.map((r, i) => ({ id: Date.now() + i + 400, name: r.name || '', title: r.title || '', company: r.company || '', phone: r.phone || '', email: r.email || '' })) : prev.references,
+        skills: Array.isArray(d.skills) ? d.skills : prev.skills,
+        competencies: Array.isArray(d.competencies) ? d.competencies : prev.competencies,
+        interests: Array.isArray(d.interests) ? d.interests : prev.interests,
+        languages: Array.isArray(d.languages)
+          ? d.languages.map((l, i) => ({
+              id: Date.now() + i,
+              lang: l.lang || l.name || l || '',
+              level: l.level || '',
+            }))
+          : prev.languages,
+
+        projects: Array.isArray(d.projects)
+          ? d.projects.map((p, i) => ({
+              id: Date.now() + i + 1000,
+              name: p.name || '',
+              startDate: p.startDate || '',
+              endDate: p.endDate || '',
+              ongoing: !!p.ongoing,
+              details: Array.isArray(p.details) ? p.details : [],
+            }))
+          : prev.projects,
+
+        activities: Array.isArray(d.activities)
+          ? d.activities.map((a, i) => ({
+              id: Date.now() + i + 1100,
+              name: a.name || '',
+              city: a.city || '',
+              district: a.district || '',
+              startDate: a.startDate || '',
+              endDate: a.endDate || '',
+              ongoing: !!a.ongoing,
+              details: Array.isArray(a.details) ? a.details : [],
+            }))
+          : prev.activities,
+
+        experience: Array.isArray(d.experience)
+          ? d.experience.map((e, i) => ({
+              id: Date.now() + i + 2000,
+              company: e.company || '',
+              city: e.city || '',
+              district: e.district || '',
+              startDate: e.startDate || '',
+              endDate: e.endDate || '',
+              ongoing: !!e.ongoing,
+              details: Array.isArray(e.details) ? e.details : [],
+            }))
+          : prev.experience,
+
+        education: Array.isArray(d.education)
+          ? d.education.map((e, i) => ({
+              id: Date.now() + i + 3000,
+              school: e.school || '',
+              city: e.city || '',
+              district: e.district || '',
+              department: e.department || '',
+              degree: e.degree || '',
+              startDate: e.startDate || '',
+              endDate: e.endDate || '',
+              ongoing: !!e.ongoing,
+              note: e.note || e.gpa || '',
+            }))
+          : prev.education,
+
+        certificates: Array.isArray(d.certificates)
+          ? d.certificates.map((c, i) => ({
+              id: Date.now() + i + 4000,
+              name: c.name || '',
+              org: c.org || c.issuer || '',
+              date: c.date || '',
+            }))
+          : prev.certificates,
+
+        references: Array.isArray(d.references)
+          ? d.references.map((r, i) => ({
+              id: Date.now() + i + 5000,
+              name: r.name || '',
+              title: r.title || '',
+              company: r.company || '',
+              phone: r.phone || '',
+              email: r.email || '',
+            }))
+          : prev.references,
       }))
       showToast('CV başarıyla okundu ve form dolduruldu!', 'info')
     } catch {
