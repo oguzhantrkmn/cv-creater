@@ -11,6 +11,11 @@ import OpenAI from 'openai'
 import multer from 'multer'
 import mammoth from 'mammoth'
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { createRequire } from 'node:module'
+
+// pdf-parse paketi CommonJS export ettiğinden ESM'de doğru şekilde yükleyelim.
+const require = createRequire(import.meta.url)
+const pdfParse = require('pdf-parse')
 
 dotenv.config()
 
@@ -797,12 +802,32 @@ app.post('/api/ai/parse-cv', upload.single('cv'), async (req, res) => {
         text = pages.join('\n')
         console.log(`PDF okundu: ${pdf.numPages} sayfa, ${text.length} karakter`)
       } catch (pdfErr) {
-        console.error('PDF parse error:', pdfErr.message)
-        return res.status(400).json({ error: 'PDF okunamadı. Dosyanızı Word (.docx) formatında deneyin.' })
+        console.error('PDF parse error (pdfjs-dist):', pdfErr?.message || pdfErr)
+
+        // Bazı PDF türlerinde pdfjs text çıkaramaz; ikinci şans olarak pdf-parse kullanıyoruz.
+        try {
+          const data = await pdfParse(req.file.buffer)
+          text = data?.text || ''
+          console.log(`PDF fallback okundu (pdf-parse), ${text.length} karakter`)
+        } catch (fallbackErr) {
+          console.error('PDF parse error (pdf-parse):', fallbackErr?.message || fallbackErr)
+          return res.status(400).json({ error: 'PDF okunamadı. Dosyanızı Word (.docx) formatında deneyin.' })
+        }
       }
     } else {
       const result = await mammoth.extractRawText({ buffer: req.file.buffer })
       text = result.value
+    }
+
+    if ((!text || text.trim().length < 50) && req.file.mimetype === 'application/pdf') {
+      // pdfjs-dist tamam ama metin çok az çıktıysa pdf-parse ile tekrar deneyelim.
+      try {
+        const data = await pdfParse(req.file.buffer)
+        text = data?.text || text
+        console.log(`PDF metin yetersiz; tekrar fallback yapıldı, ${text.length} karakter`)
+      } catch (e) {
+        console.warn('PDF fallback yeniden denemede başarısız:', e?.message || e)
+      }
     }
 
     if (!text || text.trim().length < 50) {

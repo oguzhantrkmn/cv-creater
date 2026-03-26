@@ -17,6 +17,9 @@ dist-ssr
 .env.local
 server/.env
 
+# CV özgeçmişe ekleme dokümanı (kişisel / içerik)
+cv.md
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
