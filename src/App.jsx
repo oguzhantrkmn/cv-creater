@@ -765,12 +765,13 @@ function App() {
   }, [cvData])
 
   // PDF indirme fonksiyonu – @react-pdf/renderer ile gerçek vektörel PDF üretir
-  const exportToPdf = useCallback(async () => {
+  // overrideCvData: ödeme sonrası stale closure sorununu önlemek için kullanılır
+  const exportToPdf = useCallback(async (overrideCvData) => {
+    const dataToUse = overrideCvData || cvData
     try {
-
       const { pdf } = await import('@react-pdf/renderer')
       const { default: PdfDocument } = await import('./pdf/PdfDocument')
-      const doc = React.createElement(PdfDocument, { cvData, template })
+      const doc = React.createElement(PdfDocument, { cvData: dataToUse, template })
       const blob = await pdf(doc).toBlob()
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -794,9 +795,11 @@ function App() {
     async (merchantOid, planHint) => {
       try {
         const savedCvData = localStorage.getItem('cvDataForPayment')
+        let restoredCv = null
         if (savedCvData) {
           try {
-            setCvData(JSON.parse(savedCvData))
+            restoredCv = JSON.parse(savedCvData)
+            setCvData(restoredCv)
           } catch (error) {
             console.error('CV data yüklenemedi:', error)
           }
@@ -879,7 +882,8 @@ function App() {
         }
 
         setTimeout(async () => {
-          await exportToPdf()
+          // restoredCv'yi doğrudan ilet — sayfa yenilendi ve cvData state'i henüz güncel olmayabilir
+          await exportToPdf(restoredCv || undefined)
           setHasPaid(false)
           localStorage.removeItem('paytr_merchant_oid')
           localStorage.removeItem('paytr_plan')

@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { pdf } from '@react-pdf/renderer'
+// Vite bundles the worker as a local asset — no CDN, no CSP issues
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
 
 let pdfJsLoaded = false
 let pdfJs = null
@@ -7,8 +9,7 @@ let pdfJs = null
 async function loadPdfJs() {
   if (pdfJsLoaded) return pdfJs
   const mod = await import('pdfjs-dist')
-  // CDN worker matching the installed version
-  mod.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${mod.version}/pdf.worker.min.js`
+  mod.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
   pdfJs = mod
   pdfJsLoaded = true
   return pdfJs
