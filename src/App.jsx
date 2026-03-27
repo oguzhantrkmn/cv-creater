@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState, useEffect, useCallback, forwardRef } from 'react'
-import html2canvas from 'html2canvas'
-import { jsPDF } from 'jspdf'
+import React, { lazy, Suspense } from 'react'
 import QRCode from 'qrcode'
 import './App.css'
+
+const PdfPageView = lazy(() => import('./pdf/PdfPageView'))
 import turkeyLocationsData from './data/turkey-locations.json'
 
 // Backend API URL
@@ -14,10 +15,6 @@ const API_URL = import.meta.env.VITE_API_URL ||
 /** Şablon PDF ek ücreti (TL); tüm şablonlar aynı — sunucu kuruş ile senkron */
 const CV_TEMPLATE_CATALOG = [
   { id: 'classic', label: 'Klasik', icon: '📋', priceTry: 50 },
-  { id: 'modern', label: 'Modern', icon: '🗂️', priceTry: 50 },
-  { id: 'minimal', label: 'Minimal', icon: '🤍', priceTry: 50 },
-  { id: 'creative', label: 'Yaratıcı', icon: '🎨', priceTry: 50 },
-  { id: 'compact', label: 'Kompakt', icon: '⚡', priceTry: 50 },
 ]
 
 // Türkiye illeri ve ilçeleri - JSON dosyasından yükleniyor
@@ -547,6 +544,7 @@ function App() {
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [template, setTemplate] = useState('classic')
+  const [showPdfView, setShowPdfView] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [showAtsPanel, setShowAtsPanel] = useState(false)
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true')
@@ -766,331 +764,30 @@ function App() {
     }
   }, [cvData])
 
-  // PDF indirme fonksiyonu
+  // PDF indirme fonksiyonu – @react-pdf/renderer ile gerçek vektörel PDF üretir
   const exportToPdf = useCallback(async () => {
-    if (!cvRef.current) {
-      console.error('CV ref bulunamadı')
-      alert('PDF oluşturulamadı. Lütfen sayfayı yenileyin.')
-      return
-    }
-
     try {
-      // Tüm görsellerin yüklendiğinden emin ol
-      const images = cvRef.current.querySelectorAll('img')
-      await Promise.all(
-        Array.from(images).map((img) => {
-          if (img.complete) return Promise.resolve()
-          return new Promise((resolve, reject) => {
-            img.onload = resolve
-            img.onerror = () => {
-              // Görsel yüklenemezse devam et
-              resolve()
-            }
-            // Timeout ekle
-            setTimeout(resolve, 5000)
-          })
-        })
-      )
 
-      // Önizlemedeki görünümü aynen PDF'e aktar
-      const canvas = await html2canvas(cvRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-        allowTaint: false,
-        imageTimeout: 30000,
-        removeContainer: true,
-        ignoreElements: (element) => {
-          // Logo yüklenemezse ignore et
-          if (element.tagName === 'IMG' && element.src && element.src.includes('logo.png')) {
-            return !element.complete || element.naturalHeight === 0
-          }
-          return false
-        },
-        onclone: (clonedDoc) => {
-          // Logo görüntülerini kontrol et ve hata yönetimi yap
-          const logos = clonedDoc.querySelectorAll('img[src*="logo.png"], .brand__logo, .login-modal__logo')
-          logos.forEach((logo) => {
-            // Logo yüklenemezse görünmez yap
-            if (!logo.complete || logo.naturalHeight === 0) {
-              logo.style.display = 'none'
-              logo.src = '' // Boş src ile hata önle
-            }
-          })
-
-          // Avatar görüntülerinin doğru render edilmesini sağla
-          const avatars = clonedDoc.querySelectorAll('.avatar img')
-          avatars.forEach((img) => {
-            const container = img.parentElement
-            if (container) {
-              // Container'ın boyutunu garantile
-              container.style.width = '120px'
-              container.style.height = '120px'
-              container.style.minWidth = '120px'
-              container.style.minHeight = '120px'
-              container.style.maxWidth = '120px'
-              container.style.maxHeight = '120px'
-              
-              // Image'i absolute positioning ile ortala ve kare yap
-              img.style.position = 'absolute'
-              img.style.top = '50%'
-              img.style.left = '50%'
-              img.style.transform = 'translate(-50%, -50%)'
-              img.style.width = '120px'
-              img.style.height = '120px'
-              img.style.objectFit = 'cover'
-              img.style.objectPosition = 'center'
-              img.style.minWidth = '120px'
-              img.style.minHeight = '120px'
-              img.style.maxWidth = 'none'
-              img.style.maxHeight = 'none'
-            }
-          })
-        }
-      })
-      
-      // DOM'dan gerçek içerik yüksekliğini hesapla
-      const getActualContentHeight = (element) => {
-        if (!element) return null
-        
-        // Tüm görünür child elementleri al
-        const getAllElements = (el) => {
-          const elements = []
-          const walker = document.createTreeWalker(
-            el,
-            NodeFilter.SHOW_ELEMENT,
-            {
-              acceptNode: (node) => {
-                // Görünmez elementleri atla
-                const style = window.getComputedStyle(node)
-                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-                  return NodeFilter.FILTER_REJECT
-                }
-                return NodeFilter.FILTER_ACCEPT
-              }
-            }
-          )
-          
-          let node
-          while (node = walker.nextNode()) {
-            elements.push(node)
-          }
-          return elements
-        }
-        
-        const allElements = getAllElements(element)
-        if (allElements.length === 0) {
-          // Eğer element yoksa, scrollHeight'ı kontrol et
-          const hasText = element.textContent && element.textContent.trim().length > 0
-          return hasText ? element.scrollHeight : null
-        }
-        
-        // En alttaki elementin bottom pozisyonunu bul
-        let maxBottom = 0
-        const elementRect = element.getBoundingClientRect()
-        
-        allElements.forEach((el) => {
-          const elRect = el.getBoundingClientRect()
-          const bottom = elRect.bottom - elementRect.top
-          maxBottom = Math.max(maxBottom, bottom)
-        })
-        
-        // Margin ve padding için biraz ekle (yaklaşık 30px)
-        return maxBottom > 0 ? maxBottom + 30 : null
-      }
-
-      // Önce DOM'dan hesapla
-      const domContentHeight = getActualContentHeight(cvRef.current)
-      
-      let actualFinalHeight
-      if (domContentHeight && domContentHeight > 0) {
-        // Canvas scale ile çarp (scale: 2 olduğu için)
-        const scaledDomHeight = domContentHeight * 2
-        
-        // Canvas yüksekliği ile karşılaştır, küçük olanı kullan
-        actualFinalHeight = Math.min(scaledDomHeight, canvas.height)
-        
-        // Minimum yükseklik kontrolü - çok küçükse muhtemelen yanlış hesaplanmıştır
-        // Ama gerçek içerik varsa (text uzunluğu kontrolü) kullan
-        const hasRealContent = cvRef.current.textContent && cvRef.current.textContent.trim().length > 20
-        if (actualFinalHeight < 300 && !hasRealContent) {
-          // Gerçek içerik yoksa canvas yüksekliğini kullan
-          actualFinalHeight = canvas.height
-        } else if (actualFinalHeight < 300 && hasRealContent) {
-          // Gerçek içerik varsa hesaplanan yüksekliği kullan (minimum 300px)
-          actualFinalHeight = Math.max(actualFinalHeight, 300)
-        }
-      } else {
-        // DOM'dan hesaplanamazsa canvas yüksekliğini kullan
-        actualFinalHeight = canvas.height
-      }
-      
-      // Sadece içerik kısmını al
-      const contentCanvas = document.createElement('canvas')
-      contentCanvas.width = canvas.width
-      contentCanvas.height = actualFinalHeight
-      const contentCtx = contentCanvas.getContext('2d')
-      contentCtx.drawImage(canvas, 0, 0, canvas.width, actualFinalHeight, 0, 0, canvas.width, actualFinalHeight)
-      
-      let imgData
-      try {
-        imgData = contentCanvas.toDataURL('image/png')
-      } catch (error) {
-        console.error('Canvas toDataURL PNG hatası:', error)
-        // PNG hatası varsa JPEG olarak dene
-        imgData = contentCanvas.toDataURL('image/jpeg', 0.95)
-      }
-      
-      const pdf = new jsPDF('p', 'mm', 'a4')
-      const pdfWidth = pdf.internal.pageSize.getWidth()
-      const pdfHeight = pdf.internal.pageSize.getHeight()
-      const imgHeight = (actualFinalHeight * pdfWidth) / canvas.width
-      
-      // Eğer içerik tek sayfaya sığıyorsa
-      if (imgHeight <= pdfHeight) {
-        try {
-          pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, imgHeight)
-        } catch (error) {
-          console.error('PDF addImage hatası:', error)
-          // PNG hatası varsa JPEG olarak dene
-          const jpegData = contentCanvas.toDataURL('image/jpeg', 0.95)
-          pdf.addImage(jpegData, 'JPEG', 0, 0, pdfWidth, imgHeight)
-        }
-      } else {
-        // İçerik birden fazla sayfaya yayılıyorsa
-        // Canvas pixel yüksekliği ile PDF mm yüksekliği arasındaki oran
-        const pixelToMmRatio = imgHeight / actualFinalHeight
-        
-        let position = 0
-        let pageNumber = 0
-        
-        while (position < imgHeight) {
-          if (pageNumber > 0) {
-            pdf.addPage()
-          }
-          
-          // Bu sayfada gösterilecek yükseklik
-          const remainingHeight = imgHeight - position
-          const pageContentHeight = Math.min(pdfHeight, remainingHeight)
-          
-          // Canvas'tan bu bölümü al (pixel cinsinden)
-          const sourceY = position / pixelToMmRatio
-          const sourceHeight = pageContentHeight / pixelToMmRatio
-          
-          // Canvas'tan bu bölümü yeni bir canvas'a kopyala
-          const pageCanvas = document.createElement('canvas')
-          pageCanvas.width = contentCanvas.width
-          pageCanvas.height = sourceHeight
-          const ctx = pageCanvas.getContext('2d')
-          ctx.drawImage(contentCanvas, 0, sourceY, contentCanvas.width, sourceHeight, 0, 0, contentCanvas.width, sourceHeight)
-          
-          let pageImgData
-          try {
-            pageImgData = pageCanvas.toDataURL('image/png')
-          } catch (error) {
-            console.error('Page canvas toDataURL PNG hatası:', error)
-            pageImgData = pageCanvas.toDataURL('image/jpeg', 0.95)
-          }
-          
-          // PDF'e ekle
-          try {
-            pdf.addImage(pageImgData, 'PNG', 0, 0, pdfWidth, pageContentHeight)
-          } catch (error) {
-            console.error('PDF addImage PNG hatası:', error)
-            // PNG hatası varsa JPEG olarak dene
-            if (pageImgData.includes('data:image/png')) {
-              const jpegData = pageCanvas.toDataURL('image/jpeg', 0.95)
-              pdf.addImage(jpegData, 'JPEG', 0, 0, pdfWidth, pageContentHeight)
-            } else {
-              throw error
-            }
-          }
-          
-          position += pdfHeight
-          pageNumber++
-        }
-      }
-
-      pdf.save(pdfFileName)
+      const { pdf } = await import('@react-pdf/renderer')
+      const { default: PdfDocument } = await import('./pdf/PdfDocument')
+      const doc = React.createElement(PdfDocument, { cvData, template })
+      const blob = await pdf(doc).toBlob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = pdfFileName
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
       console.log('PDF başarıyla indirildi:', pdfFileName)
       return true
     } catch (error) {
       console.error('PDF oluşturma hatası:', error)
-      // Hata mesajını daha detaylı göster
-      const errorMessage = error.message || 'Bilinmeyen hata'
-      console.error('Hata detayı:', errorMessage)
-      
-      // PNG signature hatası özel durumu
-      if (errorMessage.includes('PNG signature') || errorMessage.includes('wrong PNG')) {
-        // Logo sorunu - logo olmadan tekrar dene
-        try {
-          const canvasWithoutLogo = await html2canvas(cvRef.current, {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: '#ffffff',
-            logging: false,
-            allowTaint: false,
-            imageTimeout: 30000,
-            removeContainer: true,
-            ignoreElements: (element) => {
-              // Tüm logoları ignore et
-              return element.tagName === 'IMG' && element.src && element.src.includes('logo.png')
-            }
-          })
-          
-          const imgData = canvasWithoutLogo.toDataURL('image/jpeg', 0.95)
-          const pdf = new jsPDF('p', 'mm', 'a4')
-          const pdfWidth = pdf.internal.pageSize.getWidth()
-          const pdfHeight = pdf.internal.pageSize.getHeight()
-          const imgHeight = (canvasWithoutLogo.height * pdfWidth) / canvasWithoutLogo.width
-          
-          if (imgHeight <= pdfHeight) {
-            pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, imgHeight)
-          } else {
-            // Çok sayfalı PDF için
-            const pixelToMmRatio = imgHeight / canvasWithoutLogo.height
-            let position = 0
-            let pageNumber = 0
-            
-            while (position < imgHeight) {
-              if (pageNumber > 0) {
-                pdf.addPage()
-              }
-              
-              const remainingHeight = imgHeight - position
-              const pageContentHeight = Math.min(pdfHeight, remainingHeight)
-              const sourceY = position / pixelToMmRatio
-              const sourceHeight = pageContentHeight / pixelToMmRatio
-              
-              const pageCanvas = document.createElement('canvas')
-              pageCanvas.width = canvasWithoutLogo.width
-              pageCanvas.height = sourceHeight
-              const ctx = pageCanvas.getContext('2d')
-              ctx.drawImage(canvasWithoutLogo, 0, sourceY, canvasWithoutLogo.width, sourceHeight, 0, 0, canvasWithoutLogo.width, sourceHeight)
-              
-              const pageImgData = pageCanvas.toDataURL('image/jpeg', 0.95)
-              pdf.addImage(pageImgData, 'JPEG', 0, 0, pdfWidth, pageContentHeight)
-              
-              position += pdfHeight
-              pageNumber++
-            }
-          }
-          
-          pdf.save(pdfFileName)
-          console.log('PDF başarıyla indirildi (logo olmadan):', pdfFileName)
-          return true
-        } catch (retryError) {
-          console.error('PDF oluşturma retry hatası:', retryError)
-          alert('PDF oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.')
-          return false
-        }
-      } else {
-        alert('PDF oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.')
-        return false
-      }
+      alert('PDF oluşturulurken bir hata oluştu: ' + (error.message || 'Bilinmeyen hata'))
+      return false
     }
-  }, [pdfFileName])
+  }, [cvData, template, pdfFileName])
 
   // PayTR: ödeme sonrası doğrula, gerekirse CV kaydet, PDF indir
   const handlePaytrSuccess = useCallback(
@@ -1182,23 +879,14 @@ function App() {
         }
 
         setTimeout(async () => {
-          let retries = 0
-          while (!cvRef.current && retries < 15) {
-            await new Promise((resolve) => setTimeout(resolve, 300))
-            retries++
-          }
-          if (cvRef.current) {
-            await exportToPdf()
-            setHasPaid(false)
-            localStorage.removeItem('paytr_merchant_oid')
-            localStorage.removeItem('paytr_plan')
-            localStorage.removeItem('paytr_download_template')
-            localStorage.removeItem('paidTimestamp')
-            localStorage.removeItem('cvDataForPayment')
-          } else {
-            showToast('Ödeme başarılı! PDF otomatik inmedi; Canlı Önizleme üzerinden tekrar deneyin.', 'warning')
-          }
-        }, 2500)
+          await exportToPdf()
+          setHasPaid(false)
+          localStorage.removeItem('paytr_merchant_oid')
+          localStorage.removeItem('paytr_plan')
+          localStorage.removeItem('paytr_download_template')
+          localStorage.removeItem('paidTimestamp')
+          localStorage.removeItem('cvDataForPayment')
+        }, 800)
       } catch (error) {
         console.error('PayTR success handler:', error)
         showToast('Ödeme doğrulanamadı.')
@@ -1690,601 +1378,187 @@ function App() {
     }
   }
 
-  const renderClassicCv = (innerRef = null) => {
-    const accent = cvData.accent || '#00a8eaff'
-    return (
-      <div
-        className="cv-page cv-page--blueprint"
-        ref={innerRef}
-        style={{ '--bp-accent': accent }}
-      >
-        <header className="cv-blueprint__header">
-          <div className="cv-blueprint__header-art">
-            {cvData.avatar ? (
-              <div className={`avatar cv-blueprint__avatar ${getAvatarClass()}`}>
-                <img src={cvData.avatar} alt="" width="96" height="96" style={{ display: 'block' }} />
-              </div>
-            ) : (
-              <div className="cv-blueprint__avatar cv-blueprint__avatar--placeholder" aria-hidden />
-            )}
-            <div className="cv-blueprint__squares" aria-hidden>
-              <span /><span /><span /><span />
-            </div>
-          </div>
-          <div className="cv-blueprint__header-copy">
-            <h1 className="cv-blueprint__name">{cvData.name || 'Ad Soyad'}</h1>
-            <p className="cv-blueprint__tagline">{cvData.title || 'Uzmanlık / Ünvan'}</p>
-            <div className="cv-blueprint__rule" />
-            <div className="cv-blueprint__contact-row">
-              {cvData.phone && <span>📞 {cvData.phone}</span>}
-              {cvData.email && <span>✉️ {cvData.email}</span>}
-              {(cvData.city || cvData.district) && <span>📍 {formatLocation(cvData.city, cvData.district)}</span>}
-            </div>
-            <div className="cv-blueprint__bar" />
-          </div>
-        </header>
-
-        <div className="cv-blueprint__body">
-          <main className="cv-blueprint__main">
-            {cvData.objective && (
-              <section className="cv-blueprint__section">
-                <h2 className="cv-blueprint__h2">Hakkımda</h2>
-                <p className="cv-blueprint__p">{cvData.objective}</p>
-              </section>
-            )}
-            {cvData.experience.length > 0 && (
-              <section className="cv-blueprint__section">
-                <h2 className="cv-blueprint__h2">İş Deneyimi</h2>
-                {cvData.experience.map((item) => (
-                  <div key={item.id} className="cv-blueprint__entry">
-                    <p className="cv-blueprint__entry-title">{item.company}</p>
-                    <p className="cv-blueprint__entry-meta">
-                      {formatLocation(item.city, item.district)}
-                      {formatLocation(item.city, item.district) && ' · '}
-                      {formatDateRange(item.startDate, item.endDate, item.ongoing)}
-                    </p>
-                    {item.details?.length > 0 && (
-                      <ul className="cv-blueprint__ul">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>
-                    )}
-                  </div>
-                ))}
-              </section>
-            )}
-            {cvData.education.length > 0 && (
-              <section className="cv-blueprint__section">
-                <h2 className="cv-blueprint__h2">Eğitim Bilgisi</h2>
-                {cvData.education.map((item) => (
-                  <div key={item.id} className="cv-blueprint__entry">
-                    <p className="cv-blueprint__entry-title">{item.school}</p>
-                    <p className="cv-blueprint__entry-meta">
-                      {formatLocation(item.city, item.district)}
-                      {formatLocation(item.city, item.district) && ' · '}
-                      {formatDateRange(item.startDate, item.endDate, item.ongoing)}
-                    </p>
-                    {item.note && <p className="cv-blueprint__p">{item.note}</p>}
-                  </div>
-                ))}
-              </section>
-            )}
-            {cvData.projects.length > 0 && (
-              <section className="cv-blueprint__section">
-                <h2 className="cv-blueprint__h2">Projeler</h2>
-                {cvData.projects.map((item) => (
-                  <div key={item.id} className="cv-blueprint__entry">
-                    <p className="cv-blueprint__entry-title">{item.name}</p>
-                    <p className="cv-blueprint__entry-meta">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</p>
-                    {item.details?.length > 0 && (
-                      <ul className="cv-blueprint__ul">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>
-                    )}
-                  </div>
-                ))}
-              </section>
-            )}
-          </main>
-          <aside className="cv-blueprint__aside">
-            <section className="cv-blueprint__aside-block">
-              <h3 className="cv-blueprint__h3">Kişisel Bilgiler</h3>
-              {formatBirthDate() && (
-                <div className="cv-blueprint__kv">
-                  <strong>Doğum tarihi</strong>
-                  <span>{formatBirthDate()}</span>
-                </div>
-              )}
-              {(cvData.city || cvData.district) && (
-                <div className="cv-blueprint__kv">
-                  <strong>Konum</strong>
-                  <span>{formatLocation(cvData.city, cvData.district)}</span>
-                </div>
-              )}
-              {cvData.websiteUrl && (
-                <div className="cv-blueprint__kv">
-                  <strong>Web</strong>
-                  <span>{cvData.websiteUrl}</span>
-                </div>
-              )}
-            </section>
-            {cvData.skills.length > 0 && (
-              <section className="cv-blueprint__aside-block">
-                <h3 className="cv-blueprint__h3">Yetenekler</h3>
-                {cvData.skills.map((s, i) => (
-                  <div key={s} className="cv-blueprint__skill">
-                    <strong>{s}</strong>
-                    <span>{['İyi', 'Çok iyi', 'İleri'][i % 3]}</span>
-                  </div>
-                ))}
-              </section>
-            )}
-            {(cvData.certificates.length > 0 || cvData.activities.length > 0) && (
-              <section className="cv-blueprint__aside-block">
-                <h3 className="cv-blueprint__h3">Seminer ve Kurslar</h3>
-                {cvData.certificates.map((c) => (
-                  <div key={c.id} className="cv-blueprint__entry cv-blueprint__entry--small">
-                    <p className="cv-blueprint__entry-title">{c.name}</p>
-                    <p className="cv-blueprint__entry-meta">{c.org || c.issuer} · {c.date}</p>
-                  </div>
-                ))}
-                {cvData.activities.map((a) => (
-                  <div key={a.id} className="cv-blueprint__entry cv-blueprint__entry--small">
-                    <p className="cv-blueprint__entry-title">{a.name}</p>
-                    <p className="cv-blueprint__entry-meta">{formatDateRange(a.startDate, a.endDate, a.ongoing)}</p>
-                  </div>
-                ))}
-              </section>
-            )}
-            {qrDataUrl && <img src={qrDataUrl} alt="QR" width="56" height="56" className="cv-blueprint__qr" />}
-          </aside>
-        </div>
-      </div>
-    )
-  }
-
-  const renderMinimalCv = (innerRef = null) => (
-    <div className="cv-page cv-page--sema" ref={innerRef}>
-      <header className="cv-sema__head">
+  const renderCv = (innerRef = null) => (
+    <div className="cv-page cv-one" ref={innerRef} style={{ '--cv': cvData.accent || '#1e5aad' }}>
+      {/* HEADER */}
+      <header className="cv-one__head">
         {cvData.avatar && (
-          <div className={`avatar cv-sema__avatar ${getAvatarClass()}`}>
-            <img src={cvData.avatar} alt="" width="88" height="88" style={{ display: 'block' }} />
+          <div className={`cv-one__photo ${getAvatarClass()}`}>
+            <img src={cvData.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
           </div>
         )}
-        <h1 className="cv-sema__name">{(cvData.name || 'Ad Soyad').toLocaleUpperCase('tr-TR')}</h1>
-        <div className="cv-sema__badge" aria-hidden="true">CV</div>
-      </header>
-      <div className="cv-sema__contact-bar">
-        {(cvData.city || cvData.district) && <span>🏠 {formatLocation(cvData.city, cvData.district)}</span>}
-        {cvData.phone && <span>📞 {cvData.phone}</span>}
-        {cvData.email && <span>✉️ {cvData.email}</span>}
-      </div>
-      <div className="cv-sema__rule" />
-
-      <div className="cv-sema__grid-4">
-        <div className="cv-sema__cell">
-          <strong>Doğum tarihi</strong>
-          <span>{formatBirthDate() || '—'}</span>
-        </div>
-        <div className="cv-sema__cell">
-          <strong>Konum</strong>
-          <span>{formatLocation(cvData.city, cvData.district) || '—'}</span>
-        </div>
-        <div className="cv-sema__cell">
-          <strong>E-posta</strong>
-          <span>{cvData.email || '—'}</span>
-        </div>
-        <div className="cv-sema__cell">
-          <strong>Web / LinkedIn</strong>
-          <span>{cvData.websiteUrl || '—'}</span>
-        </div>
-      </div>
-      <div className="cv-sema__rule" />
-
-      {cvData.objective && (
-        <>
-          <p className="cv-sema__summary">{cvData.objective}</p>
-          <div className="cv-sema__rule" />
-        </>
-      )}
-
-      {cvData.experience.length > 0 && (
-        <>
-          <h2 className="cv-sema__h2">İş deneyimi</h2>
-          {cvData.experience.map((item) => (
-            <div key={item.id} className="cv-sema__block">
-              <div className="cv-sema__row-between">
-                <span className="cv-sema__role">{item.company}</span>
-                <span className="cv-sema__dates">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
-              </div>
-              {formatLocation(item.city, item.district) && (
-                <p className="cv-sema__sub">{formatLocation(item.city, item.district)}</p>
-              )}
-              {item.details?.length > 0 && (
-                <ul className="cv-sema__ul">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>
-              )}
-            </div>
-          ))}
-          <div className="cv-sema__rule" />
-        </>
-      )}
-
-      {cvData.education.length > 0 && (
-        <>
-          <h2 className="cv-sema__h2">Eğitim ve nitelikler</h2>
-          {cvData.education.map((item) => (
-            <div key={item.id} className="cv-sema__block">
-              <div className="cv-sema__row-between">
-                <span className="cv-sema__role">{item.school}</span>
-                <span className="cv-sema__dates">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
-              </div>
-              {formatLocation(item.city, item.district) && (
-                <p className="cv-sema__sub">{formatLocation(item.city, item.district)}</p>
-              )}
-              {item.note && <p className="cv-sema__note">{item.note}</p>}
-            </div>
-          ))}
-          <div className="cv-sema__rule" />
-        </>
-      )}
-
-      {cvData.skills.length > 0 && (
-        <>
-          <h2 className="cv-sema__h2">Beceriler</h2>
-          <div className="cv-sema__skills-table">
-            {cvData.skills.map((s, i) => (
-              <div key={s} className="cv-sema__skill-row">
-                <span className="cv-sema__skill-name">{s}</span>
-                <CvSkillDots filled={3 + (i % 3)} />
-                <span className="cv-sema__skill-lbl">{['İyi', 'Çok iyi', 'İleri'][i % 3]}</span>
-              </div>
-            ))}
+        <div className="cv-one__head-info">
+          <h1 className="cv-one__name">{cvData.name || 'Ad Soyad'}</h1>
+          {cvData.title && <p className="cv-one__role">{cvData.title}</p>}
+          <div className="cv-one__contact">
+            {(cvData.city || cvData.district) && <span>📍 {formatLocation(cvData.city, cvData.district)}</span>}
+            {cvData.phone && <span>📞 {cvData.phone}</span>}
+            {cvData.email && <span>✉ {cvData.email}</span>}
+            {formatBirthDate() && <span>🎂 {formatBirthDate()}</span>}
+            {cvData.websiteUrl && <span>🔗 {cvData.websiteUrl}</span>}
           </div>
-        </>
-      )}
-    </div>
-  )
-
-  const renderCv = (innerRef = null) => {
-    if (template === 'modern') return renderModernCv(innerRef)
-    if (template === 'creative') return renderCreativeCv(innerRef)
-    if (template === 'compact') return renderCompactCv(innerRef)
-    if (template === 'minimal') return renderMinimalCv(innerRef)
-    return renderClassicCv(innerRef)
-  }
-
-  const renderModernCv = (innerRef = null) => (
-    <div className="cv-page cv-page--modern cv-page--modern-erkan" ref={innerRef}>
-      <header className="cv-erkan__hero">
-        <div className="cv-erkan__photo-wrap">
-          {cvData.avatar && (
-            <div className="avatar cv-erkan__avatar avatar--square">
-              <img src={cvData.avatar} alt="" width="110" height="110" style={{ display: 'block' }} />
-            </div>
-          )}
-        </div>
-        <div className="cv-erkan__hero-text">
-          <h1 className="cv-erkan__name">{(cvData.name || 'Ad Soyad').toLocaleUpperCase('tr-TR')}</h1>
-          <div className="cv-erkan__hero-rule" />
-          <div className="cv-erkan__title-banner">{cvData.title || 'Ünvan'}</div>
         </div>
       </header>
 
-      <div className="cv-erkan__body">
-        <aside className="cv-erkan__aside">
-          <div className="cv-erkan__block">
-            <h2 className="cv-erkan__h2">İletişim</h2>
-            {cvData.phone && <p className="cv-erkan__line">📞 {cvData.phone}</p>}
-            {cvData.email && <p className="cv-erkan__line">✉️ {cvData.email}</p>}
-            {cvData.websiteUrl && <p className="cv-erkan__line">🌐 {cvData.websiteUrl}</p>}
-            {(cvData.city || cvData.district) && <p className="cv-erkan__line">📍 {formatLocation(cvData.city, cvData.district)}</p>}
-          </div>
-          {cvData.objective && (
-            <div className="cv-erkan__block">
-              <h2 className="cv-erkan__h2">Hakkımda</h2>
-              <p className="cv-erkan__p">{cvData.objective}</p>
-            </div>
-          )}
-          {cvData.skills.length > 0 && (
-            <div className="cv-erkan__block">
-              <h2 className="cv-erkan__h2">Beceriler</h2>
-              <ul className="cv-erkan__ul">
-                {cvData.skills.map((s) => <li key={s}>{s}</li>)}
-              </ul>
-            </div>
-          )}
-          {cvData.languages.length > 0 && (
-            <div className="cv-erkan__block">
-              <h2 className="cv-erkan__h2">Diller</h2>
-              <ul className="cv-erkan__ul">
-                {cvData.languages.map((item) => {
-                  const label = item.lang || item.name || ''
-                  return (
-                    <li key={label}>{label}{item.level ? ` — ${item.level}` : ''}</li>
-                  )
-                })}
-              </ul>
-            </div>
-          )}
-          {qrDataUrl && <img src={qrDataUrl} alt="QR" width="56" height="56" className="cv-erkan__qr" />}
-        </aside>
-
-        <main className="cv-erkan__main">
-          {cvData.experience.length > 0 && (
-            <section className="cv-erkan__section">
-              <h2 className="cv-erkan__h3"><span className="cv-erkan__ico" aria-hidden>💼</span> İş Deneyimi</h2>
-              {cvData.experience.map((item) => (
-                <div key={item.id} className="cv-erkan__job">
-                  <p className="cv-erkan__job-title">{item.company}</p>
-                  <p className="cv-erkan__job-meta">
-                    {formatLocation(item.city, item.district)}
-                    {formatLocation(item.city, item.district) ? ' · ' : ''}
-                    {formatDateRange(item.startDate, item.endDate, item.ongoing)}
-                  </p>
-                  {item.details?.length > 0 && item.details.map((d, i) => (
-                    <p key={i} className={i === 0 ? 'cv-erkan__job-desc' : 'cv-erkan__job-bullet'}>• {d}</p>
-                  ))}
-                </div>
-              ))}
-            </section>
-          )}
-          {cvData.education.length > 0 && (
-            <section className="cv-erkan__section">
-              <h2 className="cv-erkan__h3"><span className="cv-erkan__ico" aria-hidden>🎓</span> Eğitim</h2>
-              {cvData.education.map((item) => (
-                <div key={item.id} className="cv-erkan__job">
-                  <p className="cv-erkan__job-title">{item.school}</p>
-                  <p className="cv-erkan__job-meta">
-                    {formatLocation(item.city, item.district)}
-                    {formatLocation(item.city, item.district) && ' · '}
-                    {formatDateRange(item.startDate, item.endDate, item.ongoing)}
-                  </p>
-                  {item.note && <p className="cv-erkan__job-desc">{item.note}</p>}
-                </div>
-              ))}
-            </section>
-          )}
-          {cvData.certificates.length > 0 && (
-            <section className="cv-erkan__section">
-              <h2 className="cv-erkan__h3"><span className="cv-erkan__ico" aria-hidden>🏅</span> Sertifikalar</h2>
-              {cvData.certificates.map((item) => (
-                <div key={item.id} className="cv-erkan__cert">
-                  <span className="cv-erkan__cert-date">{item.date}</span>
-                  <div>
-                    <strong className="cv-erkan__cert-name">{item.name}</strong>
-                    <p className="cv-erkan__job-meta">{item.org || item.issuer}</p>
-                  </div>
-                </div>
-              ))}
-            </section>
-          )}
-        </main>
-      </div>
-    </div>
-  )
-
-  const renderCreativeCv = (innerRef = null) => (
-    <div
-      className="cv-page cv-page--creative"
-      ref={innerRef}
-      style={{ '--cv-accent': cvData.accent }}
-    >
-      <aside className="cv-creative__sidebar" aria-label="Profil özeti">
-        <div className="cv-creative__sidebar-accent" aria-hidden />
-        <div className="cv-creative__sidebar-inner">
-          {cvData.avatar && (
-            <div className={`avatar avatar--creative ${getAvatarClass()}`}>
-              <img src={cvData.avatar} alt="" width="90" height="90" style={{ display: 'block' }} />
-            </div>
-          )}
-
-        <div className="cv-creative__sidebar-section">
-          <h4>İletişim</h4>
-          {(cvData.city || cvData.district) && <p>📍 {formatLocation(cvData.city, cvData.district)}</p>}
-          {cvData.phone && <p>📞 {cvData.phone}</p>}
-          {cvData.email && <p>✉️ {cvData.email}</p>}
-          {formatBirthDate() && <p>🎂 {formatBirthDate()}</p>}
-          {cvData.websiteUrl && <p>🔗 {cvData.websiteUrl}</p>}
-          {qrDataUrl && <img src={qrDataUrl} alt="QR" width="64" height="64" className="cv-creative__qr" />}
-        </div>
-
-        {cvData.skills.length > 0 && (
-          <div className="cv-creative__sidebar-section">
-            <h4>Beceriler</h4>
-            {cvData.skills.map(s => <span key={s} className="cv-creative__skill-tag">{s}</span>)}
-          </div>
-        )}
-
-        {cvData.languages.length > 0 && (
-          <div className="cv-creative__sidebar-section">
-            <h4>Diller</h4>
-            {cvData.languages.map(l => (
-              <div key={l.lang} className="cv-creative__lang">
-                <span>{l.lang}</span><span className="cv-creative__lang-lvl">{l.level}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {cvData.interests.length > 0 && (
-          <div className="cv-creative__sidebar-section">
-            <h4>İlgi Alanları</h4>
-            <p className="cv-creative__sidebar-interests">{cvData.interests.join(' · ')}</p>
-          </div>
-        )}
-        </div>
-      </aside>
-
-      <div className="cv-creative__main">
-        <header className="cv-creative__ribbon">
-          <h1 className="cv-creative__hero-name">{cvData.name || 'Ad Soyad'}</h1>
-          <div className="cv-creative__hero-line" aria-hidden />
-          <p className="cv-creative__hero-title">{(cvData.title || 'Pozisyon / Ünvan').toLocaleUpperCase('tr-TR')}</p>
-        </header>
-
+      {/* BODY */}
+      <div className="cv-one__body">
         {cvData.objective && (
-          <div className="cv-creative__section">
-            <h3 className="cv-creative__h3">Özet</h3>
-            <p className="cv-creative__body">{cvData.objective}</p>
-          </div>
+          <section className="cv-one__sec">
+            <h2 className="cv-one__h">Özet</h2>
+            <p className="cv-one__para">{cvData.objective}</p>
+          </section>
         )}
-        {cvData.experience.length > 0 && (
-          <div className="cv-creative__section">
-            <h3 className="cv-creative__h3">İş Deneyimi</h3>
-            {cvData.experience.map(item => (
-              <Item key={item.id} title={item.company} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
-                {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
-              </Item>
-            ))}
-          </div>
-        )}
+
         {cvData.education.length > 0 && (
-          <div className="cv-creative__section">
-            <h3 className="cv-creative__h3">Eğitim</h3>
-            {cvData.education.map(item => (
-              <Item key={item.id} title={item.school} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
-                {item.note && <p className="muted">{item.note}</p>}
-              </Item>
-            ))}
-          </div>
-        )}
-        {cvData.projects.length > 0 && (
-          <div className="cv-creative__section">
-            <h3 className="cv-creative__h3">Projeler</h3>
-            {cvData.projects.map(item => (
-              <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)}>
-                {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
-              </Item>
-            ))}
-          </div>
-        )}
-        {cvData.activities.length > 0 && (
-          <div className="cv-creative__section">
-            <h3 className="cv-creative__h3">Aktiviteler</h3>
-            {cvData.activities.map(item => (
-              <Item key={item.id} title={item.name} subtitle={formatDateRange(item.startDate, item.endDate, item.ongoing)} location={formatLocation(item.city, item.district)}>
-                {item.details.length > 0 && <ul>{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>}
-              </Item>
-            ))}
-          </div>
-        )}
-        {cvData.certificates.length > 0 && (
-          <div className="cv-creative__section">
-            <h3 className="cv-creative__h3">Sertifikalar</h3>
-            {cvData.certificates.map(item => <Item key={item.id} title={item.name} subtitle={`${item.org} · ${item.date}`} />)}
-          </div>
-        )}
-        {cvData.competencies.length > 0 && (
-          <div className="cv-creative__section">
-            <h3 className="cv-creative__h3">Yetkinlikler</h3>
-            <ul className="cv-creative__pill-list">{cvData.competencies.map(c => <li key={c}>{c}</li>)}</ul>
-          </div>
-        )}
-        {cvData.references && cvData.references.length > 0 && (
-          <div className="cv-creative__section">
-            <h3 className="cv-creative__h3">Referanslar</h3>
-            <div className="inline-grid">
-              {cvData.references.map((ref, i) => (
-                <div key={i} className="reference-item reference-item--creative">
-                  <p className="item__title">{ref.name}</p>
-                  {ref.title && <p className="muted" style={{ margin: '2px 0' }}>{ref.title}{ref.company ? ` • ${ref.company}` : ''}</p>}
-                  <p className="muted" style={{ fontSize: '0.82em' }}>{[ref.phone, ref.email].filter(Boolean).join(' | ')}</p>
+          <section className="cv-one__sec">
+            <h2 className="cv-one__h">Eğitim</h2>
+            {cvData.education.map((item) => (
+              <div key={item.id} className="cv-one__entry">
+                <div className="cv-one__row">
+                  <strong className="cv-one__etitle">{item.school}</strong>
+                  <span className="cv-one__edate">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
                 </div>
-              ))}
+                {(item.department || formatLocation(item.city, item.district)) && (
+                  <p className="cv-one__emeta">
+                    {[item.department, formatLocation(item.city, item.district)].filter(Boolean).join(' · ')}
+                  </p>
+                )}
+                {item.note && <p className="cv-one__enote">GPA: {item.note}</p>}
+              </div>
+            ))}
+          </section>
+        )}
+
+        {cvData.experience.length > 0 && (
+          <section className="cv-one__sec">
+            <h2 className="cv-one__h">İş Deneyimi</h2>
+            {cvData.experience.map((item) => (
+              <div key={item.id} className="cv-one__entry">
+                <div className="cv-one__row">
+                  <strong className="cv-one__etitle">{item.company}</strong>
+                  <span className="cv-one__edate">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
+                </div>
+                {formatLocation(item.city, item.district) && (
+                  <p className="cv-one__emeta">📍 {formatLocation(item.city, item.district)}</p>
+                )}
+                {item.details?.length > 0 && (
+                  <ul className="cv-one__ul">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>
+                )}
+              </div>
+            ))}
+          </section>
+        )}
+
+        {cvData.projects.length > 0 && (
+          <section className="cv-one__sec">
+            <h2 className="cv-one__h">Projeler</h2>
+            {cvData.projects.map((item) => (
+              <div key={item.id} className="cv-one__entry">
+                <div className="cv-one__row">
+                  <strong className="cv-one__etitle">{item.name}</strong>
+                  <span className="cv-one__edate">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
+                </div>
+                {item.details?.length > 0 && (
+                  <ul className="cv-one__ul">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>
+                )}
+              </div>
+            ))}
+          </section>
+        )}
+
+        {cvData.activities.length > 0 && (
+          <section className="cv-one__sec">
+            <h2 className="cv-one__h">Aktiviteler</h2>
+            {cvData.activities.map((item) => (
+              <div key={item.id} className="cv-one__entry">
+                <div className="cv-one__row">
+                  <strong className="cv-one__etitle">{item.name}</strong>
+                  <span className="cv-one__edate">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
+                </div>
+                {formatLocation(item.city, item.district) && (
+                  <p className="cv-one__emeta">📍 {formatLocation(item.city, item.district)}</p>
+                )}
+                {item.details?.length > 0 && (
+                  <ul className="cv-one__ul">{item.details.map((d, i) => <li key={i}>{d}</li>)}</ul>
+                )}
+              </div>
+            ))}
+          </section>
+        )}
+
+        {cvData.certificates.length > 0 && (
+          <section className="cv-one__sec">
+            <h2 className="cv-one__h">Sertifikalar</h2>
+            {cvData.certificates.map((item) => (
+              <div key={item.id} className="cv-one__entry">
+                <div className="cv-one__row">
+                  <strong className="cv-one__etitle">{item.name}</strong>
+                  <span className="cv-one__edate">{item.date}</span>
+                </div>
+                {item.org && <p className="cv-one__emeta">{item.org}</p>}
+              </div>
+            ))}
+          </section>
+        )}
+
+        {(cvData.skills.length > 0 || cvData.languages.length > 0 || cvData.competencies.length > 0 || cvData.interests.length > 0) && (
+          <div className="cv-one__bottom">
+            <div className="cv-one__bcol">
+              {cvData.skills.length > 0 && (
+                <section className="cv-one__sec">
+                  <h2 className="cv-one__h">Teknik Beceriler</h2>
+                  <div className="cv-one__tags">
+                    {cvData.skills.map((s, i) => <span key={i} className="cv-one__tag">{s}</span>)}
+                  </div>
+                </section>
+              )}
+              {cvData.languages.length > 0 && (
+                <section className="cv-one__sec">
+                  <h2 className="cv-one__h">Yabancı Diller</h2>
+                  {cvData.languages.map((l, i) => {
+                    const label = l.lang || l.name || ''
+                    return <p key={i} className="cv-one__emeta">• {label}{l.level ? ` — ${l.level}` : ''}</p>
+                  })}
+                </section>
+              )}
+            </div>
+            <div className="cv-one__bcol">
+              {cvData.competencies.length > 0 && (
+                <section className="cv-one__sec">
+                  <h2 className="cv-one__h">Yetkinlikler</h2>
+                  <div className="cv-one__tags">
+                    {cvData.competencies.map((c, i) => <span key={i} className="cv-one__tag">{c}</span>)}
+                  </div>
+                </section>
+              )}
+              {cvData.interests.length > 0 && (
+                <section className="cv-one__sec">
+                  <h2 className="cv-one__h">İlgi Alanları</h2>
+                  <div className="cv-one__tags">
+                    {cvData.interests.map((it, i) => <span key={i} className="cv-one__tag">{it}</span>)}
+                  </div>
+                </section>
+              )}
             </div>
           </div>
         )}
-      </div>
-    </div>
-  )
 
-  const renderCompactCv = (innerRef = null) => (
-    <div className="cv-page cv-page--compact cv-page--ayla" ref={innerRef}>
-      <header className="cv-ayla__frame">
-        {cvData.avatar && (
-          <div className={`avatar cv-ayla__frame-photo avatar--square`}>
-            <img src={cvData.avatar} alt="" width="96" height="96" style={{ display: 'block' }} />
-          </div>
-        )}
-        <h1 className="cv-ayla__frame-name">{(cvData.name || 'Ad Soyad').toLocaleUpperCase('tr-TR')}</h1>
-        {qrDataUrl && <img src={qrDataUrl} alt="QR" width="48" height="48" className="cv-ayla__frame-qr" />}
-      </header>
-
-      <div className="cv-ayla__split">
-        <aside className="cv-ayla__side">
-          <section className="cv-ayla__block">
-            <h2 className="cv-ayla__h2">Kişisel bilgiler</h2>
-            <div className="cv-ayla__kv"><strong>Ad</strong><span>{cvData.name || '—'}</span></div>
-            <div className="cv-ayla__kv"><strong>Adres</strong><span>{formatLocation(cvData.city, cvData.district) || '—'}</span></div>
-            <div className="cv-ayla__kv"><strong>Telefon</strong><span>{cvData.phone || '—'}</span></div>
-            <div className="cv-ayla__kv"><strong>E-posta</strong><span>{cvData.email || '—'}</span></div>
-            <div className="cv-ayla__kv"><strong>Doğum tarihi</strong><span>{formatBirthDate() || '—'}</span></div>
-            {cvData.websiteUrl && (
-              <div className="cv-ayla__kv"><strong>Web</strong><span>{cvData.websiteUrl}</span></div>
-            )}
+        {cvData.references?.length > 0 && (
+          <section className="cv-one__sec">
+            <h2 className="cv-one__h">Referanslar</h2>
+            <div className="cv-one__refs">
+              {cvData.references.map((r, i) => (
+                <div key={i} className="cv-one__ref">
+                  <strong className="cv-one__etitle">{r.name}</strong>
+                  {(r.title || r.company) && <p className="cv-one__emeta">{[r.title, r.company].filter(Boolean).join(' · ')}</p>}
+                  {(r.phone || r.email) && <p className="cv-one__emeta">{[r.phone, r.email].filter(Boolean).join(' | ')}</p>}
+                </div>
+              ))}
+            </div>
           </section>
-          {cvData.skills.length > 0 && (
-            <section className="cv-ayla__block">
-              <h2 className="cv-ayla__h2">Beceriler</h2>
-              {cvData.skills.map((s, i) => (
-                <div key={s} className="cv-ayla__skill-row">
-                  <span>{s}</span>
-                  <CvSkillDots filled={4 + (i % 2)} />
-                </div>
-              ))}
-            </section>
-          )}
-          {cvData.languages.length > 0 && (
-            <section className="cv-ayla__block">
-              <h2 className="cv-ayla__h2">Diller</h2>
-              {cvData.languages.map((l) => {
-                const label = l.lang || l.name || ''
-                return (
-                  <div key={label} className="cv-ayla__skill-row">
-                    <span>{label}</span>
-                    <CvSkillDots filled={cvLanguageLevelDots(l.level)} />
-                  </div>
-                )
-              })}
-            </section>
-          )}
-        </aside>
+        )}
 
-        <main className="cv-ayla__main">
-          {cvData.objective && <p className="cv-ayla__lead">{cvData.objective}</p>}
-          {cvData.experience.length > 0 && (
-            <section className="cv-ayla__main-section">
-              <h2 className="cv-ayla__h2-main">İş tecrübesi</h2>
-              {cvData.experience.map((item) => (
-                <div key={item.id} className="cv-ayla__entry">
-                  <div className="cv-ayla__row-between">
-                    <strong className="cv-ayla__entry-title">{item.company}</strong>
-                    <span className="cv-ayla__dates">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
-                  </div>
-                  {formatLocation(item.city, item.district) && (
-                    <p className="cv-ayla__sub">{formatLocation(item.city, item.district)}</p>
-                  )}
-                  {item.details?.length > 0 && <p className="cv-ayla__text">{item.details[0]}</p>}
-                  {item.details?.length > 1 && (
-                    <ul className="cv-ayla__ul">{item.details.slice(1).map((d, i) => <li key={i}>{d}</li>)}</ul>
-                  )}
-                </div>
-              ))}
-            </section>
-          )}
-          {cvData.education.length > 0 && (
-            <section className="cv-ayla__main-section">
-              <h2 className="cv-ayla__h2-main">Eğitim</h2>
-              {cvData.education.map((item) => (
-                <div key={item.id} className="cv-ayla__entry">
-                  <div className="cv-ayla__row-between">
-                    <strong className="cv-ayla__entry-title">{item.school}</strong>
-                    <span className="cv-ayla__dates">{formatDateRange(item.startDate, item.endDate, item.ongoing)}</span>
-                  </div>
-                  {formatLocation(item.city, item.district) && (
-                    <p className="cv-ayla__sub">{formatLocation(item.city, item.district)}</p>
-                  )}
-                  {item.note && <p className="cv-ayla__text">{item.note}</p>}
-                </div>
-              ))}
-            </section>
-          )}
-        </main>
+        {qrDataUrl && <img src={qrDataUrl} alt="QR" width="56" height="56" style={{ marginTop: 8 }} />}
       </div>
     </div>
   )
@@ -2469,8 +1743,9 @@ function App() {
 
   const handleGoogleLogin = () => {
     setIsLoggingIn(true)
-    // Backend hazır olduğunda bu endpoint'e yönlendireceğiz
-    window.location.href = `${API_URL}/auth/google`
+    // Pass current origin so backend redirects back here after OAuth
+    const returnTo = encodeURIComponent(window.location.origin)
+    window.location.href = `${API_URL}/auth/google?returnTo=${returnTo}`
   }
 
   const handleDeleteCv = async (cvId, e) => {
@@ -3492,8 +2767,24 @@ function App() {
                 <button className="btn ghost" onClick={() => setMode('edit')}>
                   ← Düzenlemeye dön
                 </button>
+                <div className="preview-view-toggle">
+                  <button
+                    className={`preview-view-btn ${!showPdfView ? 'active' : ''}`}
+                    onClick={() => setShowPdfView(false)}
+                    title="HTML önizleme"
+                  >
+                    🖥 Canlı
+                  </button>
+                  <button
+                    className={`preview-view-btn ${showPdfView ? 'active' : ''}`}
+                    onClick={() => setShowPdfView(true)}
+                    title="Gerçek PDF önizleme (sayfa düzeni)"
+                  >
+                    📄 PDF
+                  </button>
+                </div>
                 <button className="btn primary" onClick={handlePayment}>
-                  📄 PDF İndir
+                  📥 PDF İndir
                 </button>
               </>
             )}
@@ -3503,23 +2794,8 @@ function App() {
           </div>
 
           <div className="preview-template-bar">
-            <span className="preview-template-bar__label">Şablonlar:</span>
-            {CV_TEMPLATE_CATALOG.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className={`preview-template-btn ${template === t.id ? 'active' : ''} preview-template-btn--premium`}
-                onClick={() => setTemplate(t.id)}
-              >
-                <span className="preview-template-btn__icon">{t.icon}</span>
-                <span className="preview-template-btn__meta">
-                  <span className="preview-template-btn__name">{t.label}</span>
-                  <span className="preview-template-btn__price">+₺{t.priceTry} PDF</span>
-                </span>
-              </button>
-            ))}
             <div className="preview-template-bar__color">
-              <label htmlFor="accent-preview">🎨</label>
+              <label htmlFor="accent-preview">🎨 Renk</label>
               <input
                 id="accent-preview"
                 type="color"
@@ -3529,9 +2805,17 @@ function App() {
             </div>
           </div>
 
-          <div className="cv-wrapper">
-            {renderCv(cvRef)}
-          </div>
+          {showPdfView ? (
+            <div className="cv-wrapper cv-wrapper--pdf-preview">
+              <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>PDF modülü yükleniyor…</div>}>
+                <PdfPageViewWrapper cvData={cvData} template={template} />
+              </Suspense>
+            </div>
+          ) : (
+            <div className="cv-wrapper">
+              {renderCv(cvRef)}
+            </div>
+          )}
         </div>
       )}
       {showLogin && (
@@ -3576,6 +2860,31 @@ function App() {
         <PremiumModal aiAvailable={aiAvailable} onClose={() => setShowPremiumModal(false)} onUpgrade={() => { setShowPremiumModal(false); handlePayment() }} />
       )}
     </div>
+  )
+}
+
+/* Lazy wrapper: loads PdfDocument + PdfPageView only when PDF preview is requested */
+function PdfPageViewWrapper({ cvData, template }) {
+  const PdfPageViewComp = lazy(() => import('./pdf/PdfPageView'))
+  const [PdfDoc, setPdfDoc] = React.useState(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    import('./pdf/PdfDocument').then(m => {
+      if (!cancelled) setPdfDoc(() => m.default)
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  if (!PdfDoc) return (
+    <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>PDF modülü yükleniyor…</div>
+  )
+
+  const pdfElement = React.createElement(PdfDoc, { cvData, template })
+  return (
+    <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Önizleme hazırlanıyor…</div>}>
+      <PdfPageViewComp pdfDocument={pdfElement} pageHeight={600} />
+    </Suspense>
   )
 }
 

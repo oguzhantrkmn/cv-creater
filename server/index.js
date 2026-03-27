@@ -32,6 +32,16 @@ if (process.env.OPENAI_API_KEY) {
 }
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret'
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
+
+// Allowed origins for post-OAuth redirect (security allowlist)
+const OAUTH_ALLOWED_ORIGINS = new Set([
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://cv-creater.online',
+  'https://www.cv-creater.online',
+  'https://cv-creater.netlify.app',
+  CLIENT_URL,
+].filter(Boolean))
 // Google OAuth: callback tam olarak bu URL olmalı (Google Console'da birebir aynısı)
 const SERVER_URL = (process.env.SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '')
 
@@ -341,6 +351,11 @@ app.get('/auth/google', (req, res, next) => {
   if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
     return res.status(503).json({ error: 'Google OAuth yapılandırılmamış. GOOGLE_CLIENT_ID ve GOOGLE_CLIENT_SECRET .env dosyasına eklenmeli.' })
   }
+  // Store validated returnTo in session for use after callback
+  const returnTo = req.query.returnTo
+  if (returnTo && OAUTH_ALLOWED_ORIGINS.has(returnTo)) {
+    req.session.oauthReturnTo = returnTo
+  }
   passport.authenticate('google', { scope: ['profile', 'email'], session: false })(req, res, next)
 })
 
@@ -349,7 +364,11 @@ app.get(
   passport.authenticate('google', { failureRedirect: `${CLIENT_URL}?login=failed`, session: false }),
   (req, res) => {
     const token = signToken(req.user)
-    res.redirect(`${CLIENT_URL}?token=${token}`)
+    // Redirect back to whichever origin initiated the OAuth (localhost or production)
+    const returnTo = req.session.oauthReturnTo
+    const redirectBase = (returnTo && OAUTH_ALLOWED_ORIGINS.has(returnTo)) ? returnTo : CLIENT_URL
+    delete req.session.oauthReturnTo
+    res.redirect(`${redirectBase}?token=${token}`)
   }
 )
 

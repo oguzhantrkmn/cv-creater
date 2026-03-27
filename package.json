@@ -12,6 +12,8 @@
     "dev:all": "concurrently \"npm run dev\" \"npm run server\""
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.3.2",
+    "buffer": "^6.0.3",
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.4",
     "pdfjs-dist": "^3.11.174",

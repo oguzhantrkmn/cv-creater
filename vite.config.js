@@ -9,6 +9,18 @@ export default defineConfig(({ mode }) => {
   const siteUrl = (env.VITE_SITE_URL || 'https://cv-creater.netlify.app').replace(/\/$/, '')
 
   return {
+    // Polyfill Node.js globals needed by @react-pdf/renderer in the browser
+    define: {
+      global: 'globalThis',
+    },
+    resolve: {
+      alias: {
+        buffer: 'buffer/',
+      },
+    },
+    optimizeDeps: {
+      include: ['buffer'],
+    },
     plugins: [
       react(),
       {
